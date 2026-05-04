@@ -1,0 +1,12 @@
+# VigilanceAI — Script local de detección
+# Instalar con: pip install -r requirements.txt
+
+# MediaPipe FIJADA en 0.10.14 — versiones posteriores dan AttributeError en FaceMesh
+mediapipe==0.10.14
+
+opencv-python>=4.9.0
+torch>=2.0.0
+numpy>=1.24.0
+pyserial>=3.5
+requests>=2.31.0
+scipy>=1.11.0

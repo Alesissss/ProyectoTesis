@@ -1,0 +1,4 @@
+name,accuracy,precision,recall,f1,auc,specificity,inference_ms
+MobileNetV2 (CNN),53.05,50.81,79.01,61.85,0.5135,28.94,1.28
+LSTM (EAR+MAR),74.56,68.43,87.59,76.83,0.7942,62.44,0.11
+ViT-Tiny,49.41,47.91,57.72,52.36,0.5328,41.68,1.07

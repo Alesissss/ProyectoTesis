@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(npm --version)",
+      "Bash(npm create *)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(.venv/Scripts/python.exe -c \"import bcrypt; print\\(bcrypt.__version__\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from passlib.context import CryptContext; ctx = CryptContext\\(schemes=['bcrypt'], deprecated='auto'\\); print\\(ctx.hash\\('test'\\)\\)\")",
+      "Bash(npx eslint *)",
+      "Bash(ls *.pdf *.docx *.md)",
+      "Bash(dir /b *.pdf *.docx *.md)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import sys; print\\(sys.stdin.buffer.read\\(\\).decode\\('utf-8', errors='replace'\\)\\)\")",
+      "Bash(del \"C:\\\\Users\\\\gfake\\\\Documents\\\\git\\\\ProyectoTesis\\\\_tmp_docx.txt\")",
+      "Bash(dir \"C:\\\\Users\\\\gfake\\\\Documents\\\\git\\\\ProyectoTesis\\\\modelos\" /b)",
+      "Bash(dir \"C:\\\\Users\\\\gfake\\\\Documents\\\\git\\\\ProyectoTesis\\\\features\" /b)",
+      "Bash(dir \"C:\\\\Users\\\\gfake\\\\Documents\\\\git\\\\ProyectoTesis\\\\features\")",
+      "Bash(del \"C:\\\\Users\\\\gfake\\\\Documents\\\\git\\\\ProyectoTesis\\\\_tmp_nb.txt\")",
+      "WebSearch",
+      "WebFetch(domain:www.nature.com)",
+      "WebFetch(domain:pmc.ncbi.nlm.nih.gov)",
+      "WebFetch(domain:pubmed.ncbi.nlm.nih.gov)",
+      "WebFetch(domain:www.frontiersin.org)",
+      "WebFetch(domain:doi.org)",
+      "WebFetch(domain:www.mdpi.com)",
+      "Bash(pdfinfo \"/c/Users/gfake/Documents/git/ProyectoTesis/TORRES CABREJOS_PROY.pdf\")",
+      "Bash(copy \"C:\\\\Users\\\\gfake\\\\Documents\\\\git\\\\ProyectoTesis\\\\modelos\\\\lstm_A_subjindep_best.pt\" \"C:\\\\Users\\\\gfake\\\\Documents\\\\git\\\\ProyectoTesis\\\\local\\\\modelos\\\\lstm_A_subjindep_best.pt\")",
+      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('modules/m1_vision.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK syntax'\\)\")"
+    ]
+  }
+}

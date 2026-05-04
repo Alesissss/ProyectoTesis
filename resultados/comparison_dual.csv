@@ -1,0 +1,7 @@
+Modelo,Estrategia,Accuracy (%),Precisión (%),Sensibilidad (%),Especificidad (%),F1 (%),AUC-ROC,Inferencia (ms)
+MobileNetV2 (A),A (subject-indep),53.05,50.81,79.01,28.94,61.85,0.5135,1.09
+LSTM (A),A (subject-indep),74.56,68.43,87.59,62.44,76.83,0.7942,0.11
+ViT-Tiny (A),A (subject-indep),49.41,47.91,57.72,41.68,52.36,0.5328,1.08
+MobileNetV2 (B),B (aleatorio),100.0,100.0,100.0,100.0,100.0,1.0,1.12
+LSTM (B),B (aleatorio),96.73,96.85,96.99,96.43,96.92,0.9947,0.15
+ViT-Tiny (B),B (aleatorio),99.92,99.94,99.91,99.93,99.93,1.0,1.1
