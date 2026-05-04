@@ -154,3 +154,31 @@ export interface Rol {
   nombre_rol: string
   descripcion?: string | null
 }
+
+// ── Baseline de somnolencia (M1) ──────────────────────────────────────────────
+// Coincide con BaselineSomnolenciaResponse del backend
+export interface BaselineSomnolencia {
+  id_baseline: string
+  id_usuario: string
+  p_somnolencia: number
+  ear_promedio?: number | null
+  mar_promedio?: number | null
+  duracion_s?: number | null
+  frames_procesados?: number | null
+  activo: boolean
+  fecha_registro: string
+}
+
+export interface CalibracionIniciarRequest {
+  duracion_s?: number
+  camara_id?: number
+}
+
+// Coincide con CalibracionResultadoResponse del backend
+export interface CalibracionResultado {
+  baseline: BaselineSomnolencia
+  duracion_real_s: number
+  frames_procesados: number
+  ventanas_inferidas: number
+  fps_observado?: number | null
+}

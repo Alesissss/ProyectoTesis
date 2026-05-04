@@ -11,6 +11,7 @@ from app.models.base import AuditMixin
 if TYPE_CHECKING:
     from app.models.rol import Rol
     from app.models.baseline_emg import BaselineEmg
+    from app.models.baseline_somnolencia import BaselineSomnolencia
     from app.models.evaluacion import Evaluacion
 
 
@@ -36,4 +37,7 @@ class Usuario(Base, AuditMixin):
     # Relaciones
     rol: Mapped["Rol"] = relationship("Rol", back_populates="usuarios")
     baselines: Mapped[List["BaselineEmg"]] = relationship("BaselineEmg", back_populates="usuario")
+    baselines_somnolencia: Mapped[List["BaselineSomnolencia"]] = relationship(
+        "BaselineSomnolencia", back_populates="usuario"
+    )
     evaluaciones: Mapped[List["Evaluacion"]] = relationship("Evaluacion", back_populates="usuario")

@@ -29,7 +29,8 @@
       "WebFetch(domain:www.mdpi.com)",
       "Bash(pdfinfo \"/c/Users/gfake/Documents/git/ProyectoTesis/TORRES CABREJOS_PROY.pdf\")",
       "Bash(copy \"C:\\\\Users\\\\gfake\\\\Documents\\\\git\\\\ProyectoTesis\\\\modelos\\\\lstm_A_subjindep_best.pt\" \"C:\\\\Users\\\\gfake\\\\Documents\\\\git\\\\ProyectoTesis\\\\local\\\\modelos\\\\lstm_A_subjindep_best.pt\")",
-      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('modules/m1_vision.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK syntax'\\)\")"
+      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('modules/m1_vision.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK syntax'\\)\")",
+      "Bash(xargs ls *)"
     ]
   }
 }

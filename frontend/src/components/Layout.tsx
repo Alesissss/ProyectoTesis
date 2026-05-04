@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/auth.store'
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: '📊', permiso: null },
+  { to: '/calibracion', label: 'Calibración', icon: '🎯', permiso: 'baseline_somnolencia:registrar' },
   { to: '/evaluaciones/nueva', label: 'Nueva Evaluación', icon: '🔍', permiso: 'evaluacion:registrar' },
   { to: '/evaluaciones', label: 'Mis Evaluaciones', icon: '📋', permiso: 'evaluacion:ver_propias' },
   { to: '/administracion', label: 'Administración', icon: '⚙️', permiso: 'usuario:gestionar' },

@@ -342,7 +342,20 @@ El modelo M1 desplegado es `lstm_A_subjindep_best.pt` (BiLSTM Estrategia A, `loc
 
 ---
 
-### Iteración 7. Validación de captura física e identificación de la cámara (2026-05-03)
+### Iteración 7 — Sprint 3 de Despliegue (SCRUM): Validación e integración del Módulo 1 sobre hardware real (2026-05-03 / 2026-05-04)
+
+Esta iteración corresponde al tercer sprint de la **fase de Despliegue del modelo CRISP-DM**, donde se aplica SCRUM. El sprint goal es: *validar e integrar el Módulo 1 (visión y rPPG) sobre el hardware real adquirido, asegurando calidad de señal clínicamente interpretable y verificando empíricamente la limitación de subject-dependence sobre el sujeto autor del proyecto.* El sprint se compone de cinco tareas técnicas, cada una con su propia evidencia y criterio de cierre. Las primeras cuatro cierran el frente de fotopletismografía remota; la quinta motiva el trabajo derivado de cierre del OE-04.
+
+**Tareas del sprint:**
+- 7.1 Validación de captura física e identificación de la cámara
+- 7.2 Implementación del método POS para rPPG robusto al movimiento
+- 7.3 Refinamiento del ROI facial y filtrado clínico de intervalos RR
+- 7.4 Validación clínica del pipeline rPPG y calibración del gate de calidad
+- 7.5 Verificación empírica de subject-dependence en M1 y motivación para calibración personalizada
+
+---
+
+#### 7.1 Validación de captura física e identificación de la cámara
 
 Se realizó la primera prueba integrada del Módulo 1 con la cámara real conectada por USB y el script `local/main.py` ejecutándose contra el modelo `lstm_A_subjindep_best.pt`. El objetivo fue verificar tres aspectos: (i) que el pipeline de captura entrega frames a una tasa suficiente para rPPG, (ii) que el BiLSTM opera end-to-end sobre un sujeto real fuera del dataset de entrenamiento, y (iii) que el cálculo de HRV produce valores numéricamente plausibles.
 
@@ -381,9 +394,9 @@ En ningún caso el sistema mide HRV durante la operación, donde el rPPG es téc
 
 ---
 
-### Iteración 8. Implementación de POS y gate de calidad de señal en rPPG (2026-05-03)
+#### 7.2 Implementación del método POS y gate de calidad de señal en rPPG
 
-A raíz de los resultados anómalos de HRV obtenidos en la Iteración 7 (RMSSD > SDNN, indicador de señal contaminada por movimiento), se sustituyó la línea base de fotopletismografía remota —el promedio del canal verde introducido por Verkruysse et al. [15]— por el método **POS (Plane-Orthogonal-to-Skin)** propuesto por Wang et al. [17], referente actual del estado del arte en rPPG robusto al movimiento.
+A raíz de los resultados anómalos de HRV obtenidos en la tarea 7.1 (RMSSD > SDNN, indicador de señal contaminada por movimiento), se sustituyó la línea base de fotopletismografía remota —el promedio del canal verde introducido por Verkruysse et al. [15]— por el método **POS (Plane-Orthogonal-to-Skin)** propuesto por Wang et al. [17], referente actual del estado del arte en rPPG robusto al movimiento.
 
 **Fundamento físico del método POS.** La reflectancia cutánea por canal puede descomponerse en una componente de tono de piel (variación común a R, G y B causada por iluminación, sombras y movimiento) y una componente cardíaca (modulación específica del canal verde por absorción de hemoglobina cuando llega un pulso de sangre a los capilares). El método POS proyecta la serie temporal RGB sobre un plano ortogonal al vector de tono de piel mediante la matriz fija $\mathbf{P} = \begin{pmatrix}0 & 1 & -1\\-2 & 1 & 1\end{pmatrix}$ aplicada a las señales temporalmente normalizadas $C_n = C / \overline{C}$. Con ello se obtienen dos proyecciones $S_1$ y $S_2$ que se combinan como $h = S_1 + \alpha\, S_2$, donde $\alpha = \sigma(S_1)/\sigma(S_2)$ es un autoajuste de peso que minimiza el residuo de movimiento. El proceso se realiza en ventanas deslizantes de 1.6 s con suma overlap-add a lo largo de toda la captura, según la formulación original [17, ec. 5–8].
 
@@ -401,13 +414,13 @@ Wang et al. [17] reportaron que POS reduce el error medio en la estimación de H
   - El loop principal almacena `senal_rgb` en lugar de `senal_verde`.
   - El cálculo de HRV utiliza el FPS observado real (`frames_ok / duracion`) y no el FPS solicitado al driver.
 
-Esta iteración cierra la deuda técnica derivada de la Iteración 7 sin alterar la arquitectura del sistema ni la lista de hardware. La cámara ALPCAM AR0234 sigue siendo el único sensor óptico, manteniendo intacto el argumento metodológico del **uso dual de la cámara** para M1 y rPPG.
+Esta tarea cierra la deuda técnica derivada de 7.1 sin alterar la arquitectura del sistema ni la lista de hardware. La cámara ALPCAM AR0234 sigue siendo el único sensor óptico, manteniendo intacto el argumento metodológico del **uso dual de la cámara** para M1 y rPPG.
 
 ---
 
-### Iteración 9. Refinamiento del ROI facial y filtrado clínico de intervalos RR (2026-05-03)
+#### 7.3 Refinamiento del ROI facial y filtrado clínico de intervalos RR
 
-Tras la Iteración 8, una segunda captura controlada (60 s, sujeto sentado) produjo `RMSSD/SDNN = 1.434` (calidad "baja" según el gate definido), pese a la incorporación del método POS. El análisis del pipeline reveló dos defectos adicionales que justifican una iteración de refinamiento sin cambio de arquitectura.
+Tras la tarea 7.2, una segunda captura controlada (60 s, sujeto sentado) produjo `RMSSD/SDNN = 1.434` (calidad "baja" según el gate definido), pese a la incorporación del método POS. El análisis del pipeline reveló dos defectos adicionales que justifican una iteración de refinamiento sin cambio de arquitectura.
 
 **Defecto 1 — Definición incorrecta de la región de interés (ROI) facial.** La lista de landmarks de MediaPipe FaceMesh utilizada para delimitar la "frente" en la implementación inicial (`FRENTE_LM` en `m1_vision.py`) contenía 36 puntos del **contorno facial completo**, incluyendo landmarks del jaw (152, 148, 176, 149, 150, 136, 172) y de la línea capilar lateral. Al aplicar `cv2.convexHull` sobre estos puntos, el polígono resultante cubría la cara entera —ojos, nariz, boca, pelo y barba— en lugar del parche cutáneo de la frente. La señal rPPG se contaminaba con regiones donde la perfusión capilar superficial no es homogénea (ojos en movimiento, sombras de fosas nasales, pelo facial), reduciendo significativamente la SNR.
 
@@ -430,9 +443,9 @@ Esta iteración mantiene el principio rector ya enunciado: **toda mejora en la c
 
 ---
 
-### Iteración 10. Validación clínica de las correcciones rPPG y calibración del gate de calidad (2026-05-03)
+#### 7.4 Validación clínica de las correcciones rPPG y calibración del gate de calidad
 
-Se realizó la captura de validación tras la Iteración 9 (60 s, sujeto sentado, condiciones de luz ambiente). El resultado evidencia una mejora cuantitativa y cualitativa de la señal HRV obtenida por rPPG.
+Se realizó la captura de validación tras la tarea 7.3 (60 s, sujeto sentado, condiciones de luz ambiente). El resultado evidencia una mejora cuantitativa y cualitativa de la señal HRV obtenida por rPPG.
 
 **Cuadro comparativo de las tres capturas controladas sobre el mismo sujeto:**
 
@@ -445,9 +458,9 @@ Se realizó la captura de validación tras la Iteración 9 (60 s, sujeto sentado
 | ratio RMSSD/SDNN       | 1.41   | 1.43   | **1.26**  | ≤ 1.414 (límite físico √2) |
 | RR rechazados / detectados | n/a | n/a | **53 / 88** (60 %) | — |
 
-Las tres métricas centrales caen al rango fisiológico documentado por la Task Force ESC/NASPE 1996 [11] y la guía aplicada de Shaffer y Ginsberg 2017 [16]. La reducción de SDNN de 186 ms a 61 ms y de RMSSD de 267 ms a 77 ms representa una atenuación del ruido por un factor cercano a 3.0×, atribuible conjuntamente a la corrección del ROI (Iteración 9, defecto 1) y al filtro clínico de RR (defecto 2). El conteo de intervalos rechazados —53 de 88, equivalente al 60 %— corrobora retrospectivamente que el filtro de mediana ±20 % era indispensable: sin él, esos artefactos se habrían propagado a las métricas, exactamente como ocurrió en la Iteración 7.
+Las tres métricas centrales caen al rango fisiológico documentado por la Task Force ESC/NASPE 1996 [11] y la guía aplicada de Shaffer y Ginsberg 2017 [16]. La reducción de SDNN de 186 ms a 61 ms y de RMSSD de 267 ms a 77 ms representa una atenuación del ruido por un factor cercano a 3.0×, atribuible conjuntamente a la corrección del ROI (tarea 7.3, defecto 1) y al filtro clínico de RR (defecto 2). El conteo de intervalos rechazados —53 de 88, equivalente al 60 %— corrobora retrospectivamente que el filtro de mediana ±20 % era indispensable: sin él, esos artefactos se habrían propagado a las métricas, exactamente como ocurrió en la tarea 7.1.
 
-**Calibración del umbral del gate de calidad.** El gate inicial `RMSSD/SDNN ≤ 1.0` definido en la Iteración 8 fue intencionalmente conservador. La calibración basada en literatura establece dos referencias:
+**Calibración del umbral del gate de calidad.** El gate inicial `RMSSD/SDNN ≤ 1.0` definido en la tarea 7.2 fue intencionalmente conservador. La calibración basada en literatura establece dos referencias:
 
 - **Límite físico absoluto** (Task Force [11]): RMSSD ≤ √2·SDNN ≈ 1.414. Por encima de ese valor la señal es matemáticamente inconsistente con HRV cardíaco real.
 - **Distribución empírica en sujetos sanos** (Shaffer & Ginsberg [16]): ratio típico 0.4–0.9 en reposo profundo; 1.0–1.3 admisible en estados de alerta tranquila o predominio parasimpático leve, particularmente en registros cortos donde el sujeto está consciente de la captura.
@@ -466,9 +479,9 @@ Las cifras obtenidas en la captura de validación se incorporan al Anexo corresp
 
 ---
 
-### Iteración 11. Verificación empírica de subject-dependence en M1 y motivación para calibración personalizada (2026-05-03)
+#### 7.5 Verificación empírica de subject-dependence en M1 y motivación para calibración personalizada
 
-Con el frente rPPG validado (Iteración 10), se realizó un experimento de control para evaluar la capacidad discriminativa del Módulo 1 (BiLSTM Estrategia A) sobre el sujeto autor del proyecto, cuya geometría facial cae fuera de la distribución del dataset DDD. Se diseñaron dos capturas de 60 s sobre el mismo sujeto bajo condiciones contrastantes:
+Con el frente rPPG validado (tarea 7.4), se realizó un experimento de control para evaluar la capacidad discriminativa del Módulo 1 (BiLSTM Estrategia A) sobre el sujeto autor del proyecto, cuya geometría facial cae fuera de la distribución del dataset DDD. Se diseñaron dos capturas de 60 s sobre el mismo sujeto bajo condiciones contrastantes:
 
 | Condición | EAR promedio | MAR promedio | P_somnolencia |
 |---|---:|---:|---:|
@@ -487,7 +500,7 @@ Con el frente rPPG validado (Iteración 10), se realizó un experimento de contr
 
 Bajo este protocolo, el dictamen del Módulo 1 deja de depender del valor absoluto de la salida del modelo —que está sesgada por la geometría facial individual— y pasa a medir **la desviación de cada sujeto respecto a su propio estado alerta**, que es lo clínicamente significativo. Es la traducción operativa estricta del RNF-05 (personalización por baseline) al Módulo 1.
 
-**Estatus en el alcance del Pre Informe.** La verificación empírica de la subject-dependence queda documentada como hallazgo de la Iteración 11. La implementación del baseline personal extendido a M1 constituye **trabajo derivado de cierre del OE-04**, abordable en una iteración corta de la fase de despliegue (≈ 1 día de trabajo) y no requiere reentrenamiento del modelo, cambios de arquitectura ni nuevas dependencias de hardware. La comparación de la P_somnolencia con y sin baseline personal sobre el mismo sujeto queda pendiente como evidencia cuantitativa final del cierre de OE-04.
+**Estatus en el alcance del Pre Informe.** La verificación empírica de la subject-dependence queda documentada como hallazgo de la tarea 7.5. La implementación del baseline personal extendido a M1 constituye **trabajo derivado de cierre del OE-04**, abordable como un sprint posterior dentro de la fase de despliegue (≈ 1 día de trabajo) y no requiere reentrenamiento del modelo, cambios de arquitectura ni nuevas dependencias de hardware. La comparación de la P_somnolencia con y sin baseline personal sobre el mismo sujeto queda pendiente como evidencia cuantitativa final del cierre de OE-04.
 
 ---
 

@@ -7,7 +7,15 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
-from app.routers import auth_router, usuario_router, evaluacion_router, baseline_router, rol_router
+from app.routers import (
+    auth_router,
+    usuario_router,
+    evaluacion_router,
+    baseline_router,
+    baseline_somnolencia_router,
+    calibracion_router,
+    rol_router,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +71,10 @@ app.include_router(auth_router.router,       prefix="/auth",        tags=["Auten
 app.include_router(usuario_router.router,    prefix="/usuarios",    tags=["Usuarios"])
 app.include_router(evaluacion_router.router, prefix="/evaluaciones",tags=["Evaluaciones"])
 app.include_router(baseline_router.router,   prefix="/baselines",   tags=["Baselines EMG"])
+app.include_router(baseline_somnolencia_router.router,
+                   prefix="/baselines/somnolencia", tags=["Baselines Somnolencia (M1)"])
+app.include_router(calibracion_router.router,
+                   prefix="/calibracion",           tags=["Calibración"])
 app.include_router(rol_router.router,        prefix="/roles",        tags=["Roles"])
 
 

@@ -5,6 +5,7 @@ import EvaluacionNueva from './pages/EvaluacionNueva'
 import EvaluacionDetalle from './pages/EvaluacionDetalle'
 import MisEvaluaciones from './pages/MisEvaluaciones'
 import Administracion from './pages/Administracion'
+import Calibracion from './pages/Calibracion'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 
@@ -26,6 +27,14 @@ export default function App() {
               <Route index element={<EvaluacionNueva />} />
             </Route>
             <Route path="/evaluaciones/:id" element={<EvaluacionDetalle />} />
+            <Route
+              path="/calibracion"
+              element={
+                <ProtectedRoute requiredPermiso="baseline_somnolencia:registrar" />
+              }
+            >
+              <Route index element={<Calibracion />} />
+            </Route>
             <Route
               path="/evaluaciones"
               element={

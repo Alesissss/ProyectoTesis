@@ -31,20 +31,35 @@ class ResultadoFusion:
     dictamen:             str          # 'APTO' | 'ATENCION' | 'NO_APTO'
     umbral_usado:         float
     justificacion:        list[str] = field(default_factory=list)
+    # Trazabilidad de la corrección por baseline personal (M1).
+    p_somnolencia_obs:      float | None = None
+    p_somnolencia_baseline: float | None = None
 
 
 def fusionar(
     p_somnolencia: float,
     p_fatiga_fisiologica: float,
     umbral: float = UMBRAL_APTO,
+    p_somnolencia_baseline: float | None = None,
 ) -> ResultadoFusion:
     """
     Aplica la fusión tardía ponderada y determina el dictamen.
 
-    p_somnolencia        ∈ [0, 1] — salida del Módulo 1 (BiLSTM)
-    p_fatiga_fisiologica ∈ [0, 1] — salida del Módulo 2 (motor de reglas)
-    umbral               umbral de decisión APTO/ATENCIÓN (por defecto = 0.35)
+    p_somnolencia            ∈ [0, 1] — salida del Módulo 1 (BiLSTM).
+    p_fatiga_fisiologica     ∈ [0, 1] — salida del Módulo 2 (motor de reglas).
+    umbral                   umbral de decisión APTO/ATENCIÓN.
+    p_somnolencia_baseline   P_somnolencia del sujeto en estado alerta declarado,
+                             obtenido durante la calibración M1. Si se provee,
+                             se aplica corrección personalizada:
+                                 P_efectiva = max(0, P_obs - P_baseline)
+                             según el RNF-05 y la tarea 7.5 del Pre Informe
+                             (subject-dependence verificada empíricamente).
+                             Si es None, se usa P_obs directamente.
     """
+    p_obs = p_somnolencia
+    if p_somnolencia_baseline is not None:
+        p_somnolencia = max(0.0, p_obs - p_somnolencia_baseline)
+
     p_total = (PESO_VISION * p_somnolencia) + (PESO_FISIOLOGICO * p_fatiga_fisiologica)
     p_total = max(0.0, min(1.0, p_total))
 
@@ -87,6 +102,13 @@ def fusionar(
             "nivel elevado de fatiga. No continuar con actividades críticas."
         )
 
+    if p_somnolencia_baseline is not None:
+        justificacion.append(
+            f"Corrección por baseline personal (RNF-05): "
+            f"P_obs={p_obs:.3f} - P_baseline={p_somnolencia_baseline:.3f} "
+            f"→ P_efectiva={p_somnolencia:.3f}."
+        )
+
     return ResultadoFusion(
         p_somnolencia=round(p_somnolencia, 4),
         p_fatiga_fisiologica=round(p_fatiga_fisiologica, 4),
@@ -94,6 +116,10 @@ def fusionar(
         dictamen=dictamen,
         umbral_usado=round(umbral, 4),
         justificacion=justificacion,
+        p_somnolencia_obs=round(p_obs, 4),
+        p_somnolencia_baseline=(
+            round(p_somnolencia_baseline, 4) if p_somnolencia_baseline is not None else None
+        ),
     )
 
 

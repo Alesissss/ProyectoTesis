@@ -44,6 +44,10 @@ from modules.m2_reglas import (
 )
 from modules.m3_fusion import fusionar
 
+# Marcador único que el backend (services/calibracion_service.py) usa para
+# separar el JSON final del ruido de MediaPipe / TensorFlow Lite en stdout.
+CALIBRACION_RESULT_MARKER = "===CALIBRACION_RESULT==="
+
 # ─── Configuración ────────────────────────────────────────────────────────────
 
 BACKEND_URL    = os.getenv("VIGILANCE_BACKEND", "http://localhost:8000/api")
@@ -139,6 +143,23 @@ def _get_baseline(token: str) -> dict | None:
     return None
 
 
+def _get_baseline_somnolencia(token: str) -> dict | None:
+    """Descarga el baseline personal de M1. None si no hay calibración aún."""
+    try:
+        r = requests.get(
+            f"{BACKEND_URL}/baselines/somnolencia/activo",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            payload = r.json()
+            # ApiResponse envuelve en {data: {...}} — soportar ambos formatos.
+            return payload.get("data") if "data" in payload else payload
+    except Exception:
+        pass
+    return None
+
+
 def _post_evaluacion(token: str, payload: dict) -> dict | None:
     try:
         r = requests.post(
@@ -165,16 +186,25 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
     print(f"  Duración: {duracion_s:.0f} s")
     print("═══════════════════════════════════════\n")
 
-    # ── 1. Baseline personal ──────────────────────────────────────────────────
+    # ── 1. Baselines personales (EMG/HRV + somnolencia) ──────────────────────
     print("[1/4] Descargando baseline personal...")
     baseline_dict = _get_baseline(token)
     if baseline_dict is None:
-        print("[AVISO] Sin baseline personal. M2 usará valores por defecto.")
+        print("[AVISO] Sin baseline EMG. M2 usará valores por defecto.")
         baseline = Baseline(rms_emg=50.0, freq_mediana=80.0, freq_media=85.0)
     else:
         baseline = baseline_desde_dict(baseline_dict)
         print(f"       RMS baseline={baseline.rms_emg:.1f} µV, "
               f"F_mediana={baseline.freq_mediana:.1f} Hz")
+
+    baseline_somn = _get_baseline_somnolencia(token)
+    p_baseline_somn: float | None = None
+    if baseline_somn:
+        p_baseline_somn = float(baseline_somn.get("p_somnolencia", 0.0))
+        print(f"       P_somnolencia baseline = {p_baseline_somn:.3f}")
+    else:
+        print("[AVISO] Sin baseline de somnolencia (M1). El dictamen NO aplicará "
+              "corrección personalizada — recomendado calibrar primero.")
 
     # ── 2. Detectar Arduino ───────────────────────────────────────────────────
     if puerto_arduino is None:
@@ -250,10 +280,11 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
             )
             emg_feat = None
 
-    # ── 5. Fusión tardía M3 ───────────────────────────────────────────────────
+    # ── 5. Fusión tardía M3 (con corrección por baseline si está disponible) ─
     resultado_m3 = fusionar(
         p_somnolencia=resultado_m1.p_somnolencia,
         p_fatiga_fisiologica=resultado_m2.p_fatiga,
+        p_somnolencia_baseline=p_baseline_somn,
     )
 
     print("\n──────────── RESULTADO ─────────────────")
@@ -303,6 +334,69 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
         print("      → resultado_sin_enviar.json")
 
 
+# ─── Modo calibración M1 ──────────────────────────────────────────────────────
+
+def ejecutar_calibracion_m1(
+    token: str,
+    duracion_s: float = 30.0,
+    camara_id: int = 1,
+) -> None:
+    """Captura `duracion_s` segundos del médico en estado alerta declarado y
+    POSTea el resultado a /baselines/somnolencia.
+
+    Diseñado para ser llamado tanto desde CLI (`--calibracion-m1`) como desde
+    el backend vía subprocess (servicio `CalibracionService`). En el segundo
+    caso, el backend captura stdout: por eso el JSON final se imprime detrás
+    del marcador `CALIBRACION_RESULT_MARKER` para que sea fácil de extraer
+    aunque MediaPipe escupa warnings antes.
+    """
+    print("\n═══════════════════════════════════════", file=sys.stderr)
+    print("  VigilanceAI — Calibración M1", file=sys.stderr)
+    print(f"  Mantenete alerta y quieto durante {duracion_s:.0f} s", file=sys.stderr)
+    print("═══════════════════════════════════════\n", file=sys.stderr)
+
+    m1 = ModuloVision(ruta_modelo=MODELO_M1_PATH, duracion_s=duracion_s)
+    resultado_m1 = m1.capturar_y_evaluar(camara_id=camara_id)
+
+    # POST al backend para persistir el baseline.
+    payload_post = {
+        "p_somnolencia":     resultado_m1.p_somnolencia,
+        "ear_promedio":      resultado_m1.ear_promedio,
+        "mar_promedio":      resultado_m1.mar_promedio,
+        "duracion_s":        resultado_m1.duracion_s,
+        "frames_procesados": resultado_m1.frames_procesados,
+    }
+    backend_response: dict | None = None
+    try:
+        r = requests.post(
+            f"{BACKEND_URL}/baselines/somnolencia",
+            json=payload_post,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        if r.status_code in (200, 201):
+            backend_response = r.json()
+            print(f"[OK] Baseline registrado en backend.", file=sys.stderr)
+        else:
+            print(f"[ERROR] Backend devolvió {r.status_code}: {r.text}", file=sys.stderr)
+    except Exception as exc:
+        print(f"[ERROR] No se pudo POSTear el baseline: {exc}", file=sys.stderr)
+
+    # Imprimir resultado consumible por el backend (subprocess parser).
+    resultado = {
+        "p_somnolencia":     resultado_m1.p_somnolencia,
+        "ear_promedio":      resultado_m1.ear_promedio,
+        "mar_promedio":      resultado_m1.mar_promedio,
+        "duracion_s":        resultado_m1.duracion_s,
+        "frames_procesados": resultado_m1.frames_procesados,
+        "ventanas_inferidas": resultado_m1.ventanas_inferidas,
+        "fps_observado":     resultado_m1.features.get("fps_observado"),
+        "backend_response":  backend_response,
+    }
+    print(CALIBRACION_RESULT_MARKER)
+    print(json.dumps(resultado, ensure_ascii=False))
+
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def _parse_args() -> argparse.Namespace:
@@ -316,14 +410,24 @@ def _parse_args() -> argparse.Namespace:
                    help="Índice de cámara (default: 0)")
     p.add_argument("--puerto",    default=None,
                    help="Puerto COM del Arduino (default: auto-detección)")
+    p.add_argument("--calibracion-m1", action="store_true",
+                   help="Modo calibración M1: captura sujeto alerta y registra "
+                        "p_somnolencia_baseline en el backend (no ejecuta evaluación).")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
-    ejecutar(
-        token=args.token,
-        duracion_s=args.duracion,
-        camara_id=args.camara,
-        puerto_arduino=args.puerto,
-    )
+    if args.calibracion_m1:
+        ejecutar_calibracion_m1(
+            token=args.token,
+            duracion_s=args.duracion,
+            camara_id=args.camara,
+        )
+    else:
+        ejecutar(
+            token=args.token,
+            duracion_s=args.duracion,
+            camara_id=args.camara,
+            puerto_arduino=args.puerto,
+        )

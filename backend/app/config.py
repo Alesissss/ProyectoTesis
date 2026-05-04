@@ -25,5 +25,15 @@ class Settings(BaseSettings):
     app_version: str = "1.0.0"
     debug: bool = False
 
+    # Sistema embebido (carpeta local/)
+    # Path al main.py del subproceso de captura. Resolución por defecto
+    # asume layout `<repo>/backend/` y `<repo>/local/main.py`.
+    local_main_path: str = "../local/main.py"
+    # Intérprete Python a usar para el subproceso. Por defecto, el del propio
+    # backend; en producción suele convenir apuntar al venv de `local/.venv`.
+    local_python: str = ""   # vacío = sys.executable
+    # Timeout duro en segundos para una calibración (captura + procesamiento).
+    calibracion_timeout_s: int = 90
+
 
 settings = Settings()
