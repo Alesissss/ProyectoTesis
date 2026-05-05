@@ -1,17 +1,33 @@
 import apiClient from './client'
 import type { Usuario, UsuarioCreate, UsuarioUpdate } from '../types'
 
+interface ApiEnvelope<T> {
+  status: boolean
+  message: string
+  data: T
+}
+
 export const getMe = () =>
-  apiClient.get<Usuario>('/usuarios/me').then((r) => r.data)
+  apiClient
+    .get<ApiEnvelope<Usuario>>('/usuarios/me')
+    .then((r) => r.data.data)
 
 export const getUsuarios = () =>
-  apiClient.get<Usuario[]>('/usuarios').then((r) => r.data)
+  apiClient
+    .get<ApiEnvelope<Usuario[]>>('/usuarios')
+    .then((r) => r.data.data)
 
 export const createUsuario = (data: UsuarioCreate) =>
-  apiClient.post<Usuario>('/usuarios', data).then((r) => r.data)
+  apiClient
+    .post<ApiEnvelope<Usuario>>('/usuarios', data)
+    .then((r) => r.data.data)
 
 export const updateUsuario = (id: string, data: UsuarioUpdate) =>
-  apiClient.put<Usuario>(`/usuarios/${id}`, data).then((r) => r.data)
+  apiClient
+    .put<ApiEnvelope<Usuario>>(`/usuarios/${id}`, data)
+    .then((r) => r.data.data)
 
 export const deleteUsuario = (id: string) =>
-  apiClient.delete(`/usuarios/${id}`).then((r) => r.data)
+  apiClient
+    .delete<ApiEnvelope<unknown>>(`/usuarios/${id}`)
+    .then((r) => r.data.data)

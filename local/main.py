@@ -34,7 +34,8 @@ import requests
 import serial
 import serial.tools.list_ports
 
-from modules.m1_vision import ModuloVision
+from modules.cameras import get_profile, listar_perfiles
+from modules.m1_vision import ModuloVision, validar_liveness
 from modules.m2_reglas import (
     FeaturesEMG,
     FeaturesHRV,
@@ -44,9 +45,13 @@ from modules.m2_reglas import (
 )
 from modules.m3_fusion import fusionar
 
-# Marcador único que el backend (services/calibracion_service.py) usa para
-# separar el JSON final del ruido de MediaPipe / TensorFlow Lite en stdout.
+# Marcadores únicos que el backend usa para separar el JSON útil del ruido de
+# MediaPipe / TensorFlow Lite / Torch en stdout.
+#   • CALIBRACION_RESULT_MARKER → consumido por services/calibracion_service.py
+#   • EVALUACION_RESULT_MARKER  → consumido por services/evaluacion_service.py
 CALIBRACION_RESULT_MARKER = "===CALIBRACION_RESULT==="
+EVALUACION_RESULT_MARKER  = "===EVALUACION_RESULT==="
+CAMARAS_RESULT_MARKER     = "===CAMARAS_RESULT==="
 
 # ─── Configuración ────────────────────────────────────────────────────────────
 
@@ -179,7 +184,17 @@ def _post_evaluacion(token: str, payload: dict) -> dict | None:
 # ─── Rutina principal ─────────────────────────────────────────────────────────
 
 def ejecutar(token: str, duracion_s: float = DURACION_S,
-             camara_id: int = 0, puerto_arduino: str | None = None) -> None:
+             camara_id: int | None = None,
+             puerto_arduino: str | None = None,
+             camera_profile: str | None = None) -> None:
+
+    # Cuando el backend invoca este script por subprocess, lee stdout para
+    # extraer el JSON final tras EVALUACION_RESULT_MARKER. Cualquier otro
+    # `print()` debe ir a stderr para no contaminar el JSON. Redirigimos
+    # stdout → stderr durante toda la rutina y restauramos al final solo
+    # para emitir el marcador + JSON en el stdout real.
+    _stdout_real = sys.stdout
+    sys.stdout = sys.stderr
 
     print("\n═══════════════════════════════════════")
     print("  VigilanceAI — Detección en curso")
@@ -227,11 +242,38 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
         )
         hilo_emg.start()
 
-    m1 = ModuloVision(ruta_modelo=MODELO_M1_PATH, duracion_s=duracion_s)
+    cam = get_profile(camera_profile)
+    print(f"       Cámara: {cam.name} (idx={cam.index}, "
+          f"{cam.width}x{cam.height}@{cam.fps_request}, real ~{cam.fps_real})")
+    m1 = ModuloVision(ruta_modelo=MODELO_M1_PATH, duracion_s=duracion_s, camera=cam)
     resultado_m1 = m1.capturar_y_evaluar(camara_id=camara_id)
 
     if puerto_arduino:
         hilo_emg.join(timeout=duracion_s + 5)
+
+    # ── Liveness check (anti-spoofing y guardia anti-cámara-vacía) ────────────
+    liveness_ok, razones_liveness = validar_liveness(resultado_m1)
+    if not liveness_ok:
+        print("\n[LIVENESS FAIL] Captura no válida:", file=sys.stderr)
+        for r in razones_liveness:
+            print(f"  ✗ {r}", file=sys.stderr)
+        # Emitir resultado por stdout para que el backend lo traduzca a HTTP 422.
+        # NO POSTeamos a /evaluaciones — la captura inválida no contamina la BD.
+        resultado_subprocess = {
+            "liveness_ok": False,
+            "razones_liveness": razones_liveness,
+            "duracion_real_s": float(resultado_m1.duracion_s),
+            "frames_procesados": int(resultado_m1.frames_procesados),
+            "frames_totales":    int(resultado_m1.frames_totales),
+            "tasa_deteccion_facial": resultado_m1.features.get("tasa_deteccion_facial", 0.0),
+            "parpadeos_detectados": int(resultado_m1.parpadeos_detectados),
+            "ear_std": resultado_m1.ear_std,
+            "fps_observado": resultado_m1.features.get("fps_observado"),
+        }
+        sys.stdout = _stdout_real
+        print(EVALUACION_RESULT_MARKER)
+        print(json.dumps(resultado_subprocess, ensure_ascii=False))
+        return
 
     # ── 4. Procesar EMG y calcular M2 ─────────────────────────────────────────
     muestras: list[float] = []
@@ -316,7 +358,7 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
         "metadatos": {
             "fuente":             "local_script",
             "version_modelo_m1":  "lstm_A_subjindep_best",
-            "camara":             "ALPCAM_AR0234_USB_90fps",
+            "camara":             cam.name,
             "puerto_arduino":     puerto_arduino,
             "baseline_id":        baseline_dict.get("id_baseline") if baseline_dict else None,
             "hrv_fuente":         "rppg_camara" if resultado_m1.hrv else None,
@@ -325,13 +367,39 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
 
     print("[4/4] Enviando resultado al backend...")
     respuesta = _post_evaluacion(token, payload)
+
+    # `respuesta` es el ApiResponse envelope: {status, message, data: {...}}.
+    # El id está en data.id_evaluacion.
+    id_evaluacion: str | None = None
     if respuesta:
-        print(f"      Evaluación registrada: id={respuesta.get('id_evaluacion', '?')}")
+        data_eval = respuesta.get("data") if isinstance(respuesta, dict) else None
+        if isinstance(data_eval, dict):
+            id_evaluacion = data_eval.get("id_evaluacion")
+        print(f"      Evaluación registrada: id={id_evaluacion or '?'}")
     else:
         print("      No se pudo registrar. Resultado guardado localmente.")
         with open("resultado_sin_enviar.json", "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         print("      → resultado_sin_enviar.json")
+
+    # ── Marcador para el backend (subprocess) ────────────────────────────────
+    # El JSON debe ir al stdout REAL (no al stderr al que redirigimos arriba).
+    resultado_subprocess = {
+        "id_evaluacion":     id_evaluacion,
+        "dictamen":          resultado_m3.dictamen,
+        "p_somnolencia":     resultado_m3.p_somnolencia,
+        "p_fatiga_fisiologica": resultado_m3.p_fatiga_fisiologica,
+        "p_total":           resultado_m3.p_total,
+        "duracion_real_s":   float(resultado_m1.duracion_s),
+        "frames_procesados": int(resultado_m1.frames_procesados),
+        "fps_observado":     resultado_m1.features.get("fps_observado"),
+        "n_muestras_emg":    len(muestras),
+        "hrv_disponible":    resultado_m1.hrv is not None,
+        "justificacion":     list(resultado_m3.justificacion),
+    }
+    sys.stdout = _stdout_real
+    print(EVALUACION_RESULT_MARKER)
+    print(json.dumps(resultado_subprocess, ensure_ascii=False))
 
 
 # ─── Modo calibración M1 ──────────────────────────────────────────────────────
@@ -339,7 +407,8 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
 def ejecutar_calibracion_m1(
     token: str,
     duracion_s: float = 30.0,
-    camara_id: int = 1,
+    camara_id: int | None = None,
+    camera_profile: str | None = None,
 ) -> None:
     """Captura `duracion_s` segundos del médico en estado alerta declarado y
     POSTea el resultado a /baselines/somnolencia.
@@ -355,8 +424,32 @@ def ejecutar_calibracion_m1(
     print(f"  Mantenete alerta y quieto durante {duracion_s:.0f} s", file=sys.stderr)
     print("═══════════════════════════════════════\n", file=sys.stderr)
 
-    m1 = ModuloVision(ruta_modelo=MODELO_M1_PATH, duracion_s=duracion_s)
+    cam = get_profile(camera_profile)
+    print(f"  Cámara: {cam.name}", file=sys.stderr)
+    m1 = ModuloVision(ruta_modelo=MODELO_M1_PATH, duracion_s=duracion_s, camera=cam)
     resultado_m1 = m1.capturar_y_evaluar(camara_id=camara_id)
+
+    # Liveness también aplica a calibración: si está mirando una foto, su
+    # baseline sería basura y contaminaría TODAS las futuras evaluaciones.
+    liveness_ok, razones_liveness = validar_liveness(resultado_m1)
+    if not liveness_ok:
+        print("\n[LIVENESS FAIL] Calibración rechazada:", file=sys.stderr)
+        for r in razones_liveness:
+            print(f"  ✗ {r}", file=sys.stderr)
+        resultado = {
+            "liveness_ok": False,
+            "razones_liveness": razones_liveness,
+            "frames_procesados": int(resultado_m1.frames_procesados),
+            "frames_totales":    int(resultado_m1.frames_totales),
+            "duracion_s":        float(resultado_m1.duracion_s),
+            "tasa_deteccion_facial": resultado_m1.features.get("tasa_deteccion_facial", 0.0),
+            "parpadeos_detectados": int(resultado_m1.parpadeos_detectados),
+            "ear_std": resultado_m1.ear_std,
+            "fps_observado": resultado_m1.features.get("fps_observado"),
+        }
+        print(CALIBRACION_RESULT_MARKER)
+        print(json.dumps(resultado, ensure_ascii=False))
+        return
 
     # POST al backend para persistir el baseline.
     payload_post = {
@@ -397,17 +490,97 @@ def ejecutar_calibracion_m1(
     print(json.dumps(resultado, ensure_ascii=False))
 
 
+# ─── Listado de cámaras disponibles ───────────────────────────────────────────
+
+def listar_camaras_disponibles() -> list[dict]:
+    """Escanea los índices 0..5 con DSHOW y, en los índices que matchean un
+    perfil MSMF conocido, también prueba MSMF. Devuelve cada cámara que
+    realmente entrega un frame, etiquetada con el perfil al que corresponde
+    (o `null` si es desconocida). El backend invoca esta función vía
+    subprocess con `--listar-camaras` y cachea el resultado.
+    """
+    import cv2  # local import: evita pagar el costo si no se invoca el listado
+    from modules.cameras import PROFILES
+
+    encontradas: list[dict] = []
+
+    def _match(idx: int, backend_id: int) -> str | None:
+        for nombre, p in PROFILES.items():
+            if p.index == idx and p.backend == backend_id:
+                return nombre
+        return None
+
+    def _probar(idx: int, backend_id: int, backend_label: str) -> None:
+        cap = cv2.VideoCapture(idx, backend_id)
+        try:
+            if not cap.isOpened():
+                return
+            ret, _ = cap.read()
+            if not ret:
+                return
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        finally:
+            cap.release()
+
+        profile = _match(idx, backend_id)
+        nombre_humano = PROFILES[profile].name if profile else f"Cámara desconocida"
+        label = (
+            f"{nombre_humano} — idx {idx} ({backend_label}, {w}x{h})"
+            if profile
+            else f"Cámara {idx} — {backend_label} {w}x{h}"
+        )
+        encontradas.append({
+            "index": idx,
+            "backend": backend_label,
+            "width": w,
+            "height": h,
+            "profile": profile,
+            "label": label,
+        })
+
+    # 1) DSHOW: escaneo rápido de 0..5.
+    for idx in range(6):
+        _probar(idx, cv2.CAP_DSHOW, "DSHOW")
+
+    # 2) MSMF: solo en índices que algún perfil MSMF declara como suyo.
+    msmf_idx = {p.index for p in PROFILES.values() if p.backend == cv2.CAP_MSMF}
+    for idx in sorted(msmf_idx):
+        _probar(idx, cv2.CAP_MSMF, "MSMF")
+
+    return encontradas
+
+
+def _emitir_listado_camaras() -> None:
+    """Imprime el listado en el formato esperado por el backend."""
+    encontradas = listar_camaras_disponibles()
+    print(CAMARAS_RESULT_MARKER)
+    print(json.dumps(encontradas, ensure_ascii=False))
+
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="VigilanceAI — Detección local de somnolencia y fatiga"
     )
+    # --listar-camaras es el único modo que NO requiere token (no toca la BD).
+    if "--listar-camaras" in sys.argv:
+        p.add_argument("--listar-camaras", action="store_true", required=True)
+        return p.parse_args()
+
+    p.add_argument("--listar-camaras", action="store_true",
+                   help="Lista cámaras disponibles en JSON y sale.")
     p.add_argument("--token",     required=True, help="JWT de acceso del médico")
     p.add_argument("--duracion",  type=float, default=DURACION_S,
                    help="Segundos de captura (default: 30)")
-    p.add_argument("--camara",    type=int, default=0,
-                   help="Índice de cámara (default: 0)")
+    p.add_argument("--camara",    type=int, default=None,
+                   help="Override del índice de cámara sobre el perfil "
+                        "(default: el del perfil activo).")
+    p.add_argument("--camera-profile", choices=listar_perfiles(), default=None,
+                   help="Perfil de cámara: alpcam (producción), gopro (pruebas "
+                        "GoPro Hero 11 vía utilidad), webcam (laptop). "
+                        "Default: env VIGILANCE_CAMERA_PROFILE o 'alpcam'.")
     p.add_argument("--puerto",    default=None,
                    help="Puerto COM del Arduino (default: auto-detección)")
     p.add_argument("--calibracion-m1", action="store_true",
@@ -418,11 +591,15 @@ def _parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = _parse_args()
+    if getattr(args, "listar_camaras", False):
+        _emitir_listado_camaras()
+        sys.exit(0)
     if args.calibracion_m1:
         ejecutar_calibracion_m1(
             token=args.token,
             duracion_s=args.duracion,
             camara_id=args.camara,
+            camera_profile=args.camera_profile,
         )
     else:
         ejecutar(
@@ -430,4 +607,5 @@ if __name__ == "__main__":
             duracion_s=args.duracion,
             camara_id=args.camara,
             puerto_arduino=args.puerto,
+            camera_profile=args.camera_profile,
         )

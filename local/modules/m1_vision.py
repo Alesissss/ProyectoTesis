@@ -60,23 +60,17 @@ FEAT_STD_A  = np.array([0.06629491, 0.0284285],  dtype=np.float32)
 
 UMBRAL_DEFAULT = 0.50
 
-# ─── Cámara ALPCAM AR0234 ────────────────────────────────────────────────────
-# Módulo de cámara USB con obturador global, 2 MP, 1200P, 90 fps nativos,
-# lente gran angular sin distorsión, sensor AR0234.
-# Comprada en: https://www.amazon.com/dp/B0DM92T2MC
-#
-# Configuración validada empíricamente con diagnostico_camara.py:
-#   - Backend: CAP_MSMF (Media Foundation). DSHOW ignora CAP_PROP_FOURCC
-#     y deja el stream en YUY2, saturando USB 2.0 a ~10 fps reales.
-#   - Formato: MJPG (CAP_PROP_FOURCC). 10× menos ancho de banda que YUY2.
-#   - 1280×720 @ 60 fps → ~57.6 fps reales medidos en USB 2.0.
-#   - Para llegar a 90 fps habría que usar puerto USB 3.0 (azul).
-CAM_WIDTH   = 1280
-CAM_HEIGHT  = 720
-CAM_FPS     = 60     # fps solicitado al driver
-CAM_FPS_REAL = 57.6  # fps medido — usado en el cálculo de HRV (rPPG)
-CAM_BACKEND = cv2.CAP_MSMF
-CAM_FOURCC  = cv2.VideoWriter_fourcc(*"MJPG")
+# ─── Cámara — configuración por perfil ───────────────────────────────────────
+# Los parámetros (índice, backend, resolución, fps, FOURCC) viven en
+# `cameras.py` como perfiles ("alpcam", "gopro", "webcam"). Se eligen vía CLI
+# (`--camera-profile`), variable de entorno (`VIGILANCE_CAMERA_PROFILE`), o
+# por defecto el perfil de producción ("alpcam"). Para añadir una cámara nueva
+# basta con sumar una entrada al diccionario PROFILES de cameras.py — el
+# pipeline de captura no toca.
+try:
+    from .cameras import CameraConfig, get_profile  # como paquete (main.py)
+except ImportError:                                  # como script directo
+    from cameras import CameraConfig, get_profile  # type: ignore
 
 # ─── Landmarks MediaPipe FaceMesh ────────────────────────────────────────────
 EYE_RIGHT = [33, 160, 158, 133, 153, 144]
@@ -291,7 +285,7 @@ def _pulso_pos(senal_rgb: np.ndarray, fps: float,
 
 
 def _calcular_hrv_desde_rppg(senal_rgb: list[tuple[float, float, float]],
-                              fps: float = CAM_FPS) -> dict | None:
+                              fps: float = 30.0) -> dict | None:
     """Estima HRV (SDNN, RMSSD, pNN50, HR) desde la señal rPPG.
 
     Pipeline:
@@ -309,10 +303,12 @@ def _calcular_hrv_desde_rppg(senal_rgb: list[tuple[float, float, float]],
 
     Devuelve None si no hay suficiente señal o no se detectan picos.
     """
-    if len(senal_rgb) < int(fps * 10):   # mínimo 10 s de señal
+    if not senal_rgb or len(senal_rgb) < int(fps * 10):   # mínimo 10 s de señal
         return None
 
     rgb = np.array(senal_rgb, dtype=np.float64)
+    if rgb.ndim != 2 or rgb.shape[1] != 3:
+        return None
 
     # 1. POS — pulso robusto al movimiento
     pulso = _pulso_pos(rgb, fps=fps, win_s=1.6)
@@ -374,12 +370,85 @@ class ResultadoM1:
     p_somnolencia:    float
     ear_promedio:     float
     mar_promedio:     float
-    frames_procesados: int
+    frames_procesados: int       # frames con cara detectada
+    frames_totales:    int       # frames leídos (con o sin cara)
     ventanas_inferidas: int
     duracion_s:       float
     features:         dict = field(default_factory=dict)
     # rPPG — HRV (para M2; None si no pudo calcularse)
     hrv: dict | None = None
+    # Anti-spoofing / liveness
+    parpadeos_detectados: int = 0
+    ear_std:              float = 0.0
+
+
+# ─── Validación de liveness / anti-spoofing ──────────────────────────────────
+#
+# Defiende al sistema de tres modos de fallo evidentes:
+#   1. La cámara no apunta a un sujeto (techo, escritorio, pared) → no hay cara.
+#   2. La cámara apunta a una foto / pantalla con rostro estático → hay cara
+#      detectable, pero no hay parpadeos ni perfusión sanguínea.
+#   3. Fallo prolongado de detección facial por iluminación insuficiente.
+#
+# Criterios (todos deben pasar):
+#   - tasa_deteccion_facial ≥ 0.70  → al menos 70% de los frames tuvo cara.
+#   - ear_std ≥ 0.005               → variabilidad mínima del ojo (foto ≈ 0).
+#   - parpadeos ≥ 1 cada 15 s       → al menos un parpadeo por bloque de 15 s.
+#   - hrv.calidad == "alta" si HRV existió → señal cardíaca fisiológicamente
+#     consistente (RMSSD/SDNN ≤ 1.4). Una foto da ratio aleatorio; alta calidad
+#     es prácticamente imposible de forjar sin sujeto vivo.
+#
+# Estos umbrales son conservadores: priorizan SEGURIDAD (rechazar capturas
+# dudosas) sobre conveniencia. En la tesis: defendible como "principio de
+# precaución clínica" — mejor pedir repetir la captura que emitir un dictamen
+# sobre datos no fisiológicos.
+
+LIVENESS_TASA_DETECCION_MIN = 0.70
+LIVENESS_EAR_STD_MIN        = 0.005
+LIVENESS_PARPADEOS_POR_15S  = 1
+
+
+def validar_liveness(resultado: "ResultadoM1") -> tuple[bool, list[str]]:
+    """Devuelve (válido, razones_fallo). Si válido=True, razones está vacío."""
+    razones: list[str] = []
+
+    # 1. Tasa de detección facial
+    tasa = resultado.features.get("tasa_deteccion_facial", 0.0)
+    if tasa < LIVENESS_TASA_DETECCION_MIN:
+        razones.append(
+            f"Tasa de detección facial {tasa*100:.1f}% < "
+            f"{LIVENESS_TASA_DETECCION_MIN*100:.0f}% requerido. "
+            "Apunte la cámara al rostro y verifique iluminación."
+        )
+
+    # 2. Variabilidad del EAR (anti-foto)
+    if resultado.ear_std < LIVENESS_EAR_STD_MIN:
+        razones.append(
+            f"Variabilidad ocular insuficiente (EAR std={resultado.ear_std:.4f} < "
+            f"{LIVENESS_EAR_STD_MIN}). Compatible con imagen estática (foto/pantalla)."
+        )
+
+    # 3. Parpadeos esperados
+    bloques_15s = max(1, int(resultado.duracion_s / 15))
+    parpadeos_min = bloques_15s * LIVENESS_PARPADEOS_POR_15S
+    if resultado.parpadeos_detectados < parpadeos_min:
+        razones.append(
+            f"Solo {resultado.parpadeos_detectados} parpadeos en "
+            f"{resultado.duracion_s:.0f}s (mínimo {parpadeos_min}). "
+            "Compatible con foto/pantalla o sujeto inconsciente."
+        )
+
+    # 4. Calidad de HRV — solo si la señal pudo calcularse
+    if resultado.hrv is not None:
+        calidad = resultado.hrv.get("calidad")
+        if calidad == "baja":
+            ratio = resultado.hrv.get("ratio_rmssd_sdnn", "?")
+            razones.append(
+                f"Señal rPPG sin perfusión consistente (ratio RMSSD/SDNN={ratio}). "
+                "Compatible con superficie estática sin pulso cardíaco."
+            )
+
+    return (len(razones) == 0, razones)
 
 
 # ─── Clase principal ──────────────────────────────────────────────────────────
@@ -395,10 +464,14 @@ class ModuloVision:
     def __init__(self, ruta_modelo: str | Path,
                  umbral: float = UMBRAL_DEFAULT,
                  duracion_s: float = 30.0,
-                 device: str = "cpu"):
+                 device: str = "cpu",
+                 camera: CameraConfig | None = None):
         self.umbral     = umbral
         self.duracion_s = duracion_s
         self.device     = torch.device(device)
+        # Perfil de cámara — si no se pasa, lee env VIGILANCE_CAMERA_PROFILE
+        # o cae al default ("alpcam"). Override por CLI desde main.py.
+        self.cam        = camera if camera is not None else get_profile()
 
         # Cargar LSTMDrowsy — archivo guarda solo state_dict (torch.save(model.state_dict(), path))
         self.modelo = LSTMDrowsy()
@@ -419,21 +492,27 @@ class ModuloVision:
             min_tracking_confidence=0.5,
         )
 
-    def capturar_y_evaluar(self, camara_id: int = 0) -> ResultadoM1:
+    def capturar_y_evaluar(self, camara_id: int | None = None) -> ResultadoM1:
         """
-        Abre la cámara (ALPCAM AR0234 USB esperada), captura durante
+        Abre la cámara según el perfil activo, captura durante
         duracion_s segundos y devuelve ResultadoM1 con P_somnolencia + HRV.
 
-        Backend MSMF + FOURCC MJPG: validado empíricamente como la única
-        combinación que sostiene >50 fps reales por USB 2.0 con esta cámara.
+        Si se pasa `camara_id`, sobrescribe el índice del perfil (útil cuando
+        el backend invoca con `--camara N`). El backend OpenCV y demás
+        parámetros (FOURCC, resolución, fps) provienen siempre del perfil.
         """
-        cap = cv2.VideoCapture(camara_id, CAM_BACKEND)
-        # FOURCC debe fijarse ANTES que ancho/alto/fps:
-        # cambiar de YUY2 a MJPG redefine los modos disponibles.
-        cap.set(cv2.CAP_PROP_FOURCC,       CAM_FOURCC)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAM_WIDTH)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
-        cap.set(cv2.CAP_PROP_FPS,          CAM_FPS)
+        cam = self.cam
+        idx = camara_id if camara_id is not None else cam.index
+        cap = cv2.VideoCapture(idx, cam.backend)
+        # FOURCC se fija ANTES que ancho/alto/fps: cambiar el formato
+        # redefine los modos disponibles. Algunos drivers (cámara virtual de
+        # GoPro Webcam, p.ej.) no exponen un FOURCC UVC estándar — en ese
+        # caso el perfil tiene fourcc=None y simplemente no se setea.
+        if cam.fourcc:
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*cam.fourcc))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  cam.width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cam.height)
+        cap.set(cv2.CAP_PROP_FPS,          cam.fps_request)
 
         buffer: deque = deque(maxlen=SEQ_LEN)
         ears:   list[float] = []
@@ -441,6 +520,7 @@ class ModuloVision:
         scores: list[float] = []
         senal_rgb: list[tuple[float, float, float]] = []
         frames_ok = 0
+        frames_totales = 0
         t_inicio = time.time()
 
         try:
@@ -448,6 +528,7 @@ class ModuloVision:
                 ret, frame = cap.read()
                 if not ret:
                     break
+                frames_totales += 1
 
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 result = self._face_mesh.process(rgb)
@@ -496,29 +577,53 @@ class ModuloVision:
 
         # Para HRV usamos el fps REAL medido — no el solicitado — porque
         # el filtro Butterworth y la conversión picos→ms dependen de fs real.
-        fps_observado = (frames_ok / duracion) if duracion > 0 else CAM_FPS_REAL
+        fps_observado = (frames_ok / duracion) if duracion > 0 else cam.fps_real
         hrv = _calcular_hrv_desde_rppg(senal_rgb, fps=fps_observado)
+
+        # ── Liveness: parpadeos detectados (cruces sub-umbral del EAR) ────────
+        # Un parpadeo es la transición OPEN→CLOSED→OPEN. Lo detectamos como
+        # el número de veces que EAR cae bajo el umbral. EAR_BLINK_THRESHOLD
+        # = 0.21 es el clásico de Soukupová & Cech 2016 (Real-Time Eye Blink
+        # Detection using Facial Landmarks).
+        parpadeos = 0
+        if len(ears) >= 3:
+            EAR_BLINK_THRESHOLD = 0.21
+            estado_anterior = ears[0] >= EAR_BLINK_THRESHOLD  # True = ojo abierto
+            for ear in ears[1:]:
+                estado = ear >= EAR_BLINK_THRESHOLD
+                if estado_anterior and not estado:  # cierre
+                    parpadeos += 1
+                estado_anterior = estado
+
+        ear_std_val = float(np.std(ears)) if ears else 0.0
+        tasa_deteccion = (frames_ok / frames_totales) if frames_totales > 0 else 0.0
 
         return ResultadoM1(
             p_somnolencia=round(p_somnolencia, 4),
             ear_promedio=round(float(np.mean(ears)) if ears else 0.0, 4),
             mar_promedio=round(float(np.mean(mars)) if mars else 0.0, 4),
             frames_procesados=frames_ok,
+            frames_totales=frames_totales,
             ventanas_inferidas=len(scores),
             duracion_s=round(duracion, 2),
             features={
                 "ear_promedio":     round(float(np.mean(ears)) if ears else 0.0, 4),
                 "mar_promedio":     round(float(np.mean(mars)) if mars else 0.0, 4),
-                "ear_std":          round(float(np.std(ears)) if ears else 0.0, 4),
+                "ear_std":          round(ear_std_val, 4),
                 "mar_std":          round(float(np.std(mars)) if mars else 0.0, 4),
                 "video_duration_s": round(duracion, 2),
                 "frames_con_cara":  frames_ok,
+                "frames_totales":   frames_totales,
+                "tasa_deteccion_facial": round(tasa_deteccion, 4),
+                "parpadeos":        parpadeos,
                 "ventanas_bilstm":  len(scores),
                 "rppg_frames":      len(senal_rgb),
                 "rppg_metodo":      "POS",
                 "fps_observado":    round(fps_observado, 2),
             },
             hrv=hrv,
+            parpadeos_detectados=parpadeos,
+            ear_std=round(ear_std_val, 4),
         )
 
     def __del__(self):
@@ -533,19 +638,29 @@ class ModuloVision:
 if __name__ == "__main__":
     import argparse
 
+    try:
+        from .cameras import listar_perfiles
+    except ImportError:
+        from cameras import listar_perfiles  # type: ignore
+
     p = argparse.ArgumentParser(
         description="Demo Módulo 1 — BiLSTM somnolencia + rPPG/HRV"
     )
     p.add_argument("modelo", nargs="?",
                    default="modelos/lstm_A_subjindep_best.pt",
                    help="Ruta al checkpoint lstm_A_subjindep_best.pt")
-    p.add_argument("--camara", type=int, default=1,
-                   help="Índice de cámara (0=webcam integrada laptop, 1=ALPCAM USB).")
+    p.add_argument("--camera-profile", choices=listar_perfiles(), default=None,
+                   help="Perfil de cámara (default: VIGILANCE_CAMERA_PROFILE o 'alpcam').")
+    p.add_argument("--camara", type=int, default=None,
+                   help="Override del índice de cámara (sobre el perfil).")
     p.add_argument("--duracion", type=float, default=15.0,
                    help="Segundos de captura.")
     args = p.parse_args()
 
-    m1 = ModuloVision(ruta_modelo=args.modelo, duracion_s=args.duracion)
+    cam = get_profile(args.camera_profile)
+    print(f"[cámara] {cam.name}  idx={cam.index} backend={cam.backend} "
+          f"{cam.width}x{cam.height}@{cam.fps_request} (real ~{cam.fps_real})")
+    m1 = ModuloVision(ruta_modelo=args.modelo, duracion_s=args.duracion, camera=cam)
     r = m1.capturar_y_evaluar(camara_id=args.camara)
     print(f"P_somnolencia      = {r.p_somnolencia:.4f}")
     print(f"EAR promedio       = {r.ear_promedio:.4f}")

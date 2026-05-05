@@ -65,3 +65,45 @@ class EvaluacionResumenResponse(BaseModel):
     dictamen: str
     p_total: float
     fecha_registro: datetime
+
+
+# ── Evaluación automatizada (subprocess) ─────────────────────────────────────
+
+class EvaluacionIniciarRequest(BaseModel):
+    """Parámetros opcionales para disparar una evaluación completa desde React.
+
+    Mismo patrón que CalibracionIniciarRequest. Cuando el frontend hace click
+    en "INICIAR EVALUACIÓN", el backend invoca `local/main.py` por subprocess.
+    """
+    duracion_s: int = Field(default=30, ge=10, le=180)
+    camera_profile: Optional[str] = Field(
+        default=None,
+        pattern=r"^[a-zA-Z0-9_-]{1,32}$",
+        description="ID del perfil ('alpcam' | 'gopro' | 'webcam'). Vía recomendada.",
+    )
+    camara_id: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=10,
+        description="Override opcional del índice; si se omite, usa el del perfil.",
+    )
+    puerto_arduino: Optional[str] = Field(
+        default=None,
+        description="Puerto COM/tty del Arduino. None = auto-detección.",
+    )
+
+
+class EvaluacionIniciarResultado(BaseModel):
+    """Estructura devuelta tras una evaluación exitosa disparada desde React.
+
+    Empaqueta la evaluación ya persistida (la registra el script local vía
+    POST /evaluaciones) y métricas de captura para que la UI las muestre sin
+    re-fetchear.
+    """
+    evaluacion: EvaluacionResponse
+    duracion_real_s: float
+    frames_procesados: int
+    fps_observado: Optional[float] = None
+    n_muestras_emg: int = 0
+    hrv_disponible: bool = False
+    justificacion: list[str] = Field(default_factory=list)

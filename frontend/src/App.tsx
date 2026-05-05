@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
-import EvaluacionNueva from './pages/EvaluacionNueva'
+import EvaluacionAuto from './pages/EvaluacionAuto'
 import EvaluacionDetalle from './pages/EvaluacionDetalle'
 import MisEvaluaciones from './pages/MisEvaluaciones'
 import Administracion from './pages/Administracion'
@@ -19,12 +19,12 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route
-              path="/evaluaciones/nueva"
+              path="/evaluaciones/iniciar"
               element={
                 <ProtectedRoute requiredPermiso="evaluacion:registrar" />
               }
             >
-              <Route index element={<EvaluacionNueva />} />
+              <Route index element={<EvaluacionAuto />} />
             </Route>
             <Route path="/evaluaciones/:id" element={<EvaluacionDetalle />} />
             <Route

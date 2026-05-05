@@ -46,7 +46,7 @@ export default function Dashboard() {
     .slice(0, 8)
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Bienvenido, {user?.nombre}</h1>
         <p className="text-slate-500 text-sm mt-1">
@@ -57,7 +57,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
         {[
           { label: 'Total',     value: evaluaciones.length,    color: 'text-slate-900', bg: 'bg-slate-100' },
           { label: 'Aptos',     value: totals['APTO'] ?? 0,    color: 'text-green-700', bg: 'bg-green-50' },
@@ -73,10 +73,10 @@ export default function Dashboard() {
 
       {hasPermission('evaluacion:registrar') && (
         <Link
-          to="/evaluaciones/nueva"
+          to="/evaluaciones/iniciar"
           className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2.5 rounded-lg text-sm mb-6 transition-colors"
         >
-          + Registrar nueva evaluación
+          ▶ Iniciar evaluación
         </Link>
       )}
 
@@ -95,7 +95,8 @@ export default function Dashboard() {
         )}
 
         {!loading && !error && recent.length > 0 && (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[480px]">
             <thead className="bg-slate-50">
               <tr>
                 <th className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Fecha</th>
@@ -133,6 +134,7 @@ export default function Dashboard() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

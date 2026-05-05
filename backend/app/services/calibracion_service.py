@@ -16,6 +16,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -23,6 +25,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+
+# UTF-8 obligatorio en stdout del subprocess (Windows default cp1252).
+_SUBPROCESS_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
 from app.dtos.auth_dto import TokenData
 from app.dtos.baseline_somnolencia_dto import (
     BaselineSomnolenciaCreateRequest,
@@ -63,6 +68,14 @@ class CalibracionService:
         async with _calibracion_lock:
             datos_local = await self._ejecutar_subproceso(request, bearer_token)
 
+        # Liveness: si la captura no es de un sujeto vivo, no se persiste un
+        # baseline basura (que contaminaría TODAS las futuras evaluaciones).
+        if datos_local.get("liveness_ok") is False:
+            razones = datos_local.get("razones_liveness", [])
+            mensaje = "Calibración rechazada: " + " | ".join(razones) if razones else \
+                      "La calibración no superó la validación de liveness."
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, mensaje)
+
         # Persistir el baseline (servicio existente)
         create_req = BaselineSomnolenciaCreateRequest(
             p_somnolencia=datos_local["p_somnolencia"],
@@ -88,7 +101,7 @@ class CalibracionService:
     ) -> dict:
         """Ejecuta el subproceso de captura y devuelve el dict parseado del JSON."""
         local_main = self._resolver_main_path()
-        python_exe = settings.local_python or sys.executable
+        python_exe = settings.resolver_python_local()
 
         cmd = [
             python_exe,
@@ -96,31 +109,32 @@ class CalibracionService:
             "--calibracion-m1",
             "--token", bearer_token,
             "--duracion", str(request.duracion_s),
-            "--camara", str(request.camara_id),
         ]
+        if request.camera_profile:
+            cmd.extend(["--camera-profile", request.camera_profile])
+        if request.camara_id is not None:
+            cmd.extend(["--camara", str(request.camara_id)])
 
         logger.info("Disparando subproceso de calibración: %s", " ".join(cmd[:3]))
 
+        # subprocess.run síncrono dentro de to_thread: evita el NotImplementedError
+        # que tira asyncio.create_subprocess_exec cuando uvicorn corre con
+        # SelectorEventLoop en Windows. Ver feedback_subprocess_loop.md.
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            completed = await asyncio.to_thread(
+                subprocess.run,
+                cmd,
                 cwd=str(local_main.parent),
+                env=_SUBPROCESS_ENV,
+                capture_output=True,
+                timeout=settings.calibracion_timeout_s,
+                check=False,
             )
-            try:
-                stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout=settings.calibracion_timeout_s,
-                )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                raise HTTPException(
-                    status.HTTP_504_GATEWAY_TIMEOUT,
-                    f"La calibración excedió {settings.calibracion_timeout_s} s.",
-                )
-
+        except subprocess.TimeoutExpired:
+            raise HTTPException(
+                status.HTTP_504_GATEWAY_TIMEOUT,
+                f"La calibración excedió {settings.calibracion_timeout_s} s.",
+            )
         except FileNotFoundError as exc:
             logger.exception("No se encontró el script local de calibración")
             raise HTTPException(
@@ -128,14 +142,14 @@ class CalibracionService:
                 f"No se encontró el script de captura: {exc}",
             )
 
-        stdout = stdout_b.decode("utf-8", errors="replace")
-        stderr = stderr_b.decode("utf-8", errors="replace")
+        stdout = completed.stdout.decode("utf-8", errors="replace")
+        stderr = completed.stderr.decode("utf-8", errors="replace")
 
-        if proc.returncode != 0:
-            logger.error("Subproceso falló (code=%s). stderr=%s", proc.returncode, stderr[-500:])
+        if completed.returncode != 0:
+            logger.error("Subproceso falló (code=%s). stderr=%s", completed.returncode, stderr[-500:])
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                f"La captura falló (código {proc.returncode}). "
+                f"La captura falló (código {completed.returncode}). "
                 f"Detalle: {stderr.strip().splitlines()[-1] if stderr.strip() else 'sin detalle'}",
             )
 
@@ -158,6 +172,12 @@ class CalibracionService:
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
                 f"Resultado de calibración malformado: {exc}",
             )
+
+        # Liveness fail: el subprocess emite el dict sin p_somnolencia. Es
+        # válido — la captura se rechazó antes de inferir. Devolvemos el dict
+        # tal cual; el caller lo traduce a HTTP 422.
+        if data.get("liveness_ok") is False:
+            return data
 
         if "p_somnolencia" not in data:
             raise HTTPException(

@@ -126,15 +126,15 @@ export default function Administracion() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="mb-6 flex items-center justify-between">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Administración</h1>
           <p className="text-slate-500 text-sm mt-1">Gestión de usuarios del sistema</p>
         </div>
         <button
           onClick={openCreate}
-          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
         >
           + Nuevo usuario
         </button>
@@ -150,7 +150,8 @@ export default function Administracion() {
         {loading ? (
           <div className="text-center py-10 text-slate-400 text-sm">Cargando...</div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[640px]">
             <thead className="bg-slate-50">
               <tr>
                 <th className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Nombre</th>
@@ -197,6 +198,7 @@ export default function Administracion() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

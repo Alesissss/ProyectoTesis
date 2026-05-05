@@ -1,12 +1,14 @@
 import uuid
 from typing import List
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Header, status
 
 from app.data.database import AuditedAsyncSession
 from app.dtos.auth_dto import TokenData
 from app.dtos.common_dto import ApiResponse
 from app.dtos.evaluacion_dto import (
+    EvaluacionIniciarRequest,
+    EvaluacionIniciarResultado,
     EvaluacionRequest,
     EvaluacionResponse,
     EvaluacionResumenResponse,
@@ -34,6 +36,29 @@ async def registrar_evaluacion(
     El backend NO realiza ningún cálculo; solo valida el JSON y lo persiste.
     """
     data = await _service.registrar(db, request, current_user)
+    return ApiResponse.success(data)
+
+
+@router.post(
+    "/iniciar",
+    response_model=ApiResponse[EvaluacionIniciarResultado],
+    status_code=status.HTTP_200_OK,
+    summary="Iniciar evaluación completa (subprocess local) y devolver el dictamen",
+)
+async def iniciar_evaluacion(
+    request: EvaluacionIniciarRequest,
+    authorization: str = Header(...),
+    current_user: TokenData = Depends(require_permission("evaluacion:registrar")),
+    db: AuditedAsyncSession = Depends(get_db),
+) -> ApiResponse[EvaluacionIniciarResultado]:
+    """Lanza `local/main.py` como subproceso, espera el JSON con el id de la
+    evaluación recién registrada y devuelve el dictamen al frontend para
+    renderizar el semáforo APTO/ATENCIÓN/NO_APTO sin que el médico vea consola.
+
+    Mismo patrón que `POST /calibracion/somnolencia/iniciar`.
+    """
+    bearer = authorization.removeprefix("Bearer ").strip()
+    data = await _service.iniciar_evaluacion(db, request, current_user, bearer)
     return ApiResponse.success(data)
 
 

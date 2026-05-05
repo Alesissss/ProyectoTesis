@@ -3,12 +3,12 @@ import {
   getBaselineSomnolenciaActivo,
   iniciarCalibracionM1,
 } from '../api/baselineSomnolencia.api'
+import CameraSelector from '../components/CameraSelector'
 import type { BaselineSomnolencia, CalibracionResultado } from '../types'
 
-type Step = 'idle' | 'loading' | 'success' | 'error'
+type Step = 'idle' | 'loading' | 'success' | 'error' | 'invalid'
 
 const DURACION_DEFAULT = 30
-const CAMARA_DEFAULT = 1
 
 export default function Calibracion() {
   const [step, setStep] = useState<Step>('idle')
@@ -18,7 +18,7 @@ export default function Calibracion() {
 
   // Parámetros de captura (el RNF-05 fija 30 s, pero permitimos ajustarlo).
   const [duracion, setDuracion] = useState(DURACION_DEFAULT)
-  const [camaraId, setCamaraId] = useState(CAMARA_DEFAULT)
+  const [cameraProfile, setCameraProfile] = useState<string | null>(null)
 
   // Cargar el baseline vigente del usuario al entrar a la pantalla.
   useEffect(() => {
@@ -33,23 +33,24 @@ export default function Calibracion() {
     try {
       const r = await iniciarCalibracionM1({
         duracion_s: duracion,
-        camara_id: camaraId,
+        camera_profile: cameraProfile,
       })
       setResultado(r)
       setActivo(r.baseline)
       setStep('success')
     } catch (err: unknown) {
+      const ax = err as { response?: { status?: number; data?: { message?: string } } }
       const msg =
-        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+        ax?.response?.data?.message ??
         (err as Error)?.message ??
         'Error desconocido al ejecutar la calibración'
       setError(msg)
-      setStep('error')
+      setStep(ax?.response?.status === 422 ? 'invalid' : 'error')
     }
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-3xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Calibración personal — M1</h1>
         <p className="text-slate-500 text-sm mt-1">
@@ -63,7 +64,7 @@ export default function Calibracion() {
       <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
         <h2 className="font-semibold text-slate-900 mb-3">Baseline vigente</h2>
         {activo ? (
-          <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <Stat label="P_somnolencia base" value={activo.p_somnolencia.toFixed(4)} />
             <Stat
               label="EAR promedio"
@@ -104,7 +105,7 @@ export default function Calibracion() {
           <li>Evita movimientos bruscos. La cámara se activará al pulsar el botón.</li>
         </ol>
 
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">
               Duración (s)
@@ -119,23 +120,11 @@ export default function Calibracion() {
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              Índice de cámara
-            </label>
-            <input
-              type="number"
-              min={0}
-              max={10}
-              value={camaraId}
-              onChange={(e) => setCamaraId(parseInt(e.target.value, 10) || 0)}
-              disabled={step === 'loading'}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
-            />
-            <p className="text-xs text-slate-400 mt-1">
-              0 = webcam integrada · 1 = ALPCAM USB (default)
-            </p>
-          </div>
+          <CameraSelector
+            value={cameraProfile}
+            onChange={(profile) => setCameraProfile(profile)}
+            disabled={step === 'loading'}
+          />
         </div>
 
         <button
@@ -163,7 +152,7 @@ export default function Calibracion() {
       {step === 'success' && resultado && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-5 mb-6">
           <h3 className="font-semibold text-green-900 mb-2">Calibración registrada</h3>
-          <div className="grid grid-cols-2 gap-3 text-sm text-green-900/90">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-green-900/90">
             <Stat
               label="P_somnolencia base"
               value={resultado.baseline.p_somnolencia.toFixed(4)}
@@ -198,6 +187,32 @@ export default function Calibracion() {
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
           <p className="font-semibold mb-1">No se pudo completar la calibración</p>
           <p>{error}</p>
+        </div>
+      )}
+
+      {step === 'invalid' && error && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-5 text-sm text-amber-900">
+          <div className="flex items-start gap-3 mb-3">
+            <span className="text-2xl leading-none">⚠</span>
+            <div>
+              <p className="font-semibold text-base mb-1">
+                Calibración rechazada — baseline NO registrado
+              </p>
+              <p className="text-amber-800/90 text-xs">
+                El sistema no validó la captura como un sujeto vivo y atento
+                frente a la cámara. Tu baseline anterior (si lo tienes) sigue
+                vigente. Razones detectadas:
+              </p>
+            </div>
+          </div>
+          <ul className="space-y-1 ml-9 list-disc list-inside">
+            {error
+              .replace(/^Calibración rechazada:\s*/, '')
+              .split('|')
+              .map((razon, i) => (
+                <li key={i}>{razon.trim()}</li>
+              ))}
+          </ul>
         </div>
       )}
     </div>

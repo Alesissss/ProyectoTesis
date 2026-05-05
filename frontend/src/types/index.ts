@@ -123,6 +123,36 @@ export interface EvaluacionResumen {
   fecha_registro: string
 }
 
+// ── Evaluación automatizada (subprocess) ──────────────────────────────────────
+// Cámaras disponibles devueltas por GET /dispositivos/camaras
+export interface CamaraDisponible {
+  index: number
+  backend: string         // "DSHOW" | "MSMF"
+  width: number
+  height: number
+  profile: string | null  // "alpcam" | "gopro" | "webcam" | null
+  label: string           // texto humano para el dropdown
+}
+
+// Coincide con EvaluacionIniciarRequest del backend
+export interface EvaluacionIniciarRequest {
+  duracion_s?: number
+  camera_profile?: string | null
+  camara_id?: number | null
+  puerto_arduino?: string | null
+}
+
+// Coincide con EvaluacionIniciarResultado del backend
+export interface EvaluacionIniciarResultado {
+  evaluacion: Evaluacion
+  duracion_real_s: number
+  frames_procesados: number
+  fps_observado?: number | null
+  n_muestras_emg: number
+  hrv_disponible: boolean
+  justificacion: string[]
+}
+
 // ── Baselines EMG ─────────────────────────────────────────────────────────────
 // Coincide con BaselineCreateRequest del backend
 export interface BaselineCreate {
@@ -171,7 +201,8 @@ export interface BaselineSomnolencia {
 
 export interface CalibracionIniciarRequest {
   duracion_s?: number
-  camara_id?: number
+  camera_profile?: string | null
+  camara_id?: number | null
 }
 
 // Coincide con CalibracionResultadoResponse del backend

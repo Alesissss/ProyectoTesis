@@ -30,7 +30,32 @@
       "Bash(pdfinfo \"/c/Users/gfake/Documents/git/ProyectoTesis/TORRES CABREJOS_PROY.pdf\")",
       "Bash(copy \"C:\\\\Users\\\\gfake\\\\Documents\\\\git\\\\ProyectoTesis\\\\modelos\\\\lstm_A_subjindep_best.pt\" \"C:\\\\Users\\\\gfake\\\\Documents\\\\git\\\\ProyectoTesis\\\\local\\\\modelos\\\\lstm_A_subjindep_best.pt\")",
       "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('modules/m1_vision.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK syntax'\\)\")",
-      "Bash(xargs ls *)"
+      "Bash(xargs ls *)",
+      "Bash(python -c \"from app.main import app; print\\('OK', len\\(app.routes\\), 'routes'\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"from app.main import app; print\\('OK routes=', len\\(app.routes\\)\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0, '.'\\); from app.main import app; print\\('OK routes=', len\\(app.routes\\)\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0, '.'\\); from main import app; print\\('OK routes=', len\\(app.routes\\)\\)\")",
+      "Bash(./node_modules/.bin/tsc -b)",
+      "Bash(xargs wc *)",
+      "PowerShell(Get-PnpDevice *)",
+      "Bash(python diagnostico_camara.py --no-preview --backend MSMF)",
+      "Bash(powershell *)",
+      "Bash(python diagnostico_camara.py --backend MSMF --no-preview)",
+      "Bash(./.venv/Scripts/python.exe diagnostico_camara.py --backend MSMF --no-preview)",
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ./.venv/Scripts/python.exe diagnostico_camara.py --backend DSHOW --no-preview)",
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ./.venv/Scripts/python.exe *)",
+      "Bash(./.venv/Scripts/python.exe -c ' *)",
+      "Bash(npx --no-install tsc --noEmit)",
+      "Bash(./.venv/Scripts/python.exe -c \"from app.config import settings; print\\('python local resuelto:', settings.resolver_python_local\\(\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe main.py --listar-camaras)",
+      "Bash(curl -s -m 5 http://localhost:8000/)",
+      "Bash(curl -s -m 5 http://localhost:8000/dispositivos/camaras)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(curl -s -m 5 http://localhost:8000/openapi.json)",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); paths=[p for p in d['paths'] if 'dispositivo' in p or 'camara' in p]; print\\(paths\\)\")",
+      "Bash(curl -s -m 5 http://localhost:5173/api/dispositivos/camaras)",
+      "Bash(curl -s -m 60 -H \"Content-Type: application/json\" -d '{\"correo\":\"admin@vigilanceai.com\",\"contrasena\":\"admin\"}' http://localhost:8000/auth/login)",
+      "Bash(.venv/Scripts/python.exe *)"
     ]
   }
 }

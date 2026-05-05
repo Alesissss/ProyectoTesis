@@ -37,7 +37,17 @@ class BaselineSomnolenciaResponse(BaseModel):
 class CalibracionIniciarRequest(BaseModel):
     """Parámetros opcionales para disparar la calibración M1 desde React."""
     duracion_s: int = Field(default=30, ge=10, le=120)
-    camara_id: int = Field(default=1, ge=0, le=10)
+    # Perfil de cámara — id del listado de /dispositivos/camaras
+    # ("alpcam" | "gopro" | "webcam" | None). Si viene, fija backend, FOURCC
+    # y resolución del subproceso. Es la vía recomendada.
+    camera_profile: Optional[str] = Field(
+        default=None,
+        pattern=r"^[a-zA-Z0-9_-]{1,32}$",
+    )
+    # Override del índice de cámara (legacy / opcional). Si camera_profile está
+    # presente, este índice prevalece sobre el del perfil; útil cuando hay dos
+    # cámaras del mismo modelo conectadas.
+    camara_id: Optional[int] = Field(default=None, ge=0, le=10)
 
 
 class CalibracionResultadoResponse(BaseModel):

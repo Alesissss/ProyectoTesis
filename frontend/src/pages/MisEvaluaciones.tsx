@@ -34,17 +34,17 @@ export default function MisEvaluaciones() {
   }, [])
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="mb-6 flex items-center justify-between">
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Mis Evaluaciones</h1>
           <p className="text-slate-500 text-sm mt-1">Historial completo de tus evaluaciones</p>
         </div>
         <Link
-          to="/evaluaciones/nueva"
-          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+          to="/evaluaciones/iniciar"
+          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors text-center sm:text-left whitespace-nowrap"
         >
-          + Nueva
+          ▶ Iniciar evaluación
         </Link>
       </div>
 
@@ -55,14 +55,15 @@ export default function MisEvaluaciones() {
         {!loading && !error && evaluaciones.length === 0 && (
           <div className="text-center py-10 text-slate-400 text-sm">
             No tienes evaluaciones registradas.
-            <Link to="/evaluaciones/nueva" className="block mt-2 text-blue-600 hover:underline">
-              Registrar primera evaluación →
+            <Link to="/evaluaciones/iniciar" className="block mt-2 text-blue-600 hover:underline">
+              Iniciar primera evaluación →
             </Link>
           </div>
         )}
 
         {!loading && !error && evaluaciones.length > 0 && (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[480px]">
             <thead className="bg-slate-50">
               <tr>
                 <th className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Fecha</th>
@@ -100,6 +101,7 @@ export default function MisEvaluaciones() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

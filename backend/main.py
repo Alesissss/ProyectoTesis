@@ -1,4 +1,15 @@
+import asyncio
 import logging
+import sys
+
+# ── Event loop policy en Windows ─────────────────────────────────────────────
+# `asyncio.create_subprocess_exec` (usado por dispositivos_service /
+# evaluacion_service / calibracion_service) requiere ProactorEventLoop. Si
+# uvicorn arranca con SelectorEventLoop (puede pasar según versión / flags),
+# todo subprocess crashea con `NotImplementedError`. Forzamos la policy
+# correcta ANTES de importar cualquier otra cosa.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -14,6 +25,7 @@ from app.routers import (
     baseline_router,
     baseline_somnolencia_router,
     calibracion_router,
+    dispositivos_router,
     rol_router,
 )
 
@@ -76,6 +88,8 @@ app.include_router(baseline_somnolencia_router.router,
 app.include_router(calibracion_router.router,
                    prefix="/calibracion",           tags=["Calibración"])
 app.include_router(rol_router.router,        prefix="/roles",        tags=["Roles"])
+app.include_router(dispositivos_router.router,
+                   prefix="/dispositivos",         tags=["Dispositivos"])
 
 
 @app.get("/", tags=["Health"])
