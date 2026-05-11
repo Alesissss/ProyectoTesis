@@ -4,7 +4,7 @@
 **Autor:** Jorge Alexis Torres Cabrejos · USAT · 2026
 **Alcance:** Backend (FastAPI + PostgreSQL 16) + Frontend (React 19 + TS + Tailwind) + módulos locales (`local/`).
 **Estándar de referencia:** ISO/IEC 25010:2023 (modelo de calidad del producto software).
-**Fecha:** 2026-05-04.
+**Fecha:** 2026-05-04 (creación) · **Última actualización:** 2026-05-06 (incorpora validación hardware EMG).
 
 > Este documento traza cada característica de calidad contra la implementación
 > real del sistema (archivos, líneas, comandos verificables). Es el insumo
@@ -147,6 +147,7 @@ El backend FastAPI no ejecuta directamente la captura: dispara `local/main.py` c
 | Recuperabilidad | Si el backend no responde, el script local persiste el resultado en `resultado_sin_enviar.json` (`local/main.py`, líneas finales de `ejecutar`). |
 | Disponibilidad | FastAPI corre con uvicorn worker async; el OOM o crash de un request no tumba el servidor. Excepciones no manejadas se interceptan en `backend/main.py:unhandled_exception_handler` y devuelven 500 estructurado. |
 | Madurez | Manejo explícito de `TimeoutError`, `FileNotFoundError`, `JSONDecodeError` en `evaluacion_service.py:_ejecutar_subproceso`. |
+| **Integridad de la cadena hardware (M2 / EMG)** | **Validada el 2026-05-06** mediante el protocolo de antena corporal (`local/test_emg.py`): tasa de muestreo real medida 498.5 Hz vs 500 Hz objetivo (desviación 0.4 %, dentro de tolerancia del oscilador del UNO); dominancia del **82.4 % de la potencia espectral en 58–62 Hz** confirma que el shield Olimex está midiendo correctamente la diferencia IN+/IN− referida al DRL del cable casero. Componentes validados: ADC, instrumentation amplifier ×1000 del shield, filtros analógicos del frontend, soldadura del cable, firmware Butterworth orden 4, transmisión serial. Defecto detectado y corregido: sentencia `delay(10000)` espuria en el `loop()` del firmware que reducía la fs efectiva a 0.1 Hz. |
 
 **Pendiente:** prueba controlada de "qué pasa si el backend está caído" durante la captura — el flujo offline está implementado pero falta capturar evidencia (screenshot del archivo JSON resultante).
 
@@ -206,6 +207,7 @@ ISO/IEC 25010:2023 fusiona aquí Adaptabilidad, Escalabilidad, Instalabilidad y 
 | **Fail-safe** | Si rPPG no es válido (gate de calidad RMSSD/SDNN > 1.4) → no contribuye al dictamen. Si EMG no llega → reglas se redistribuyen, no se "inventan" valores. |
 | **Hazard warning** | El sistema avisa en logs y en la UI cuando NO hay calibración personal: "el dictamen NO aplicará corrección personalizada — recomendado calibrar primero" (`local/main.py`). |
 | **Integración segura** | El subprocess se ejecuta con timeout duro y se mata (`proc.kill()`) si excede `evaluacion_timeout_s`. El JWT del médico se reenvía solo por args, no por env ni por shell. |
+| **Buenas prácticas de captura clínica** | Recomendación documentada del docente asesor (2026-05-06): para la sesión clínica de captura EMG sostenida no es suficiente desinfectar la piel con alcohol isopropílico; se requiere gel conductor electrolítico (clase Signa Gel / Ten20 / gel ECG-EEG genérico) que mantenga la impedancia piel-electrodo baja y estable durante toda la captura, atenuando la contaminación por modo común de 60 Hz. Esta indicación queda registrada como criterio de calidad operativa antes de la sesión clínica final. |
 
 **Limitación declarada:** el sistema es una **ayuda a la decisión clínica**, no un reemplazo del juicio médico. Esta declaración debe figurar en el manual de usuario y en el consentimiento del estudio (OE-07 final).
 

@@ -25,6 +25,9 @@ Facultad de Ingeniería — Escuela de Ingeniería de Sistemas y Computación
     - [Iteración 4: Modelado](#iteración-4-modelado)
     - [Iteración 5: Implementación del sistema web (Backend y Frontend)](#iteración-5-implementación-del-sistema-web-backend-y-frontend)
     - [Iteración 6: Módulo 2 — Motor de reglas fisiológicas](#iteración-6-módulo-2--motor-de-reglas-fisiológicas)
+    - [Iteración 7: Validación e integración del Módulo 1 sobre hardware real (rPPG)](#iteración-7--sprint-3-de-despliegue-scrum-validación-e-integración-del-módulo-1-sobre-hardware-real-2026-05-03--2026-05-04)
+    - [Iteración 8: Calibración personal de M1 (cierre OE-04) y validación hardware EMG (cierre parcial OE-05/06)](#iteración-8--sprint-4-de-despliegue-scrum-calibración-personal-de-m1-y-validación-de-la-cadena-hardware-emg-2026-05-04--2026-05-06)
+    - [Iteración 9: Evaluación bajo ISO/IEC 25010:2023 (OE-07)](#iteración-9--sprint-5-de-despliegue-scrum-evaluación-del-sistema-bajo-isoiec-250102023-oe-07-2026-05-06)
   - [1.2 En base a los objetivos del proyecto](#12-en-base-a-los-objetivos-del-proyecto)
     - [OE-01: Variables conductuales y fisiológicas](#oe-01-determinar-las-variables-relacionadas-a-los-factores-conductuales-y-fisiológicos)
     - [OE-02: Comparación de algoritmos](#oe-02-comparar-algoritmos-basados-en-visión-artificial)
@@ -32,6 +35,7 @@ Facultad de Ingeniería — Escuela de Ingeniería de Sistemas y Computación
     - [OE-04: Evaluación de métricas](#oe-04-evaluar-la-precisión-sensibilidad-y-especificidad)
     - [OE-05: Componentes de hardware embebido (parcial)](#oe-05-determinar-componentes-de-hardware-embebido-parcial)
     - [OE-06: Integración del modelo con hardware (parcial)](#oe-06-integración-del-modelo-con-hardware-embebido-parcial)
+    - [OE-07: Evaluación bajo ISO/IEC 25010:2023 (parcial)](#oe-07-evaluación-bajo-isoiec-250102023-parcial)
 - [II. REFERENCIAS BIBLIOGRÁFICAS](#ii-referencias-bibliográficas)
 - [ANEXOS](#anexos)
 
@@ -340,6 +344,18 @@ Se completó la integración de los Módulos 1, 2 y 3 en un script local de Pyth
 
 El modelo M1 desplegado es `lstm_A_subjindep_best.pt` (BiLSTM Estrategia A, `local/modelos/`). La integración cumple el RNF-01 (evaluación ≤ 10 s) para los módulos de procesamiento, excluyendo el tiempo de captura de 30 s que es fijo por diseño (RF-01, RF-02). La evaluación completa post-captura (M1+M2+M3) se estima en < 2 s en CPU estándar, dada la latencia de inferencia del BiLSTM (0.11 ms/imagen, Estrategia A).
 
+**Validación adicional incorporada (Iteración 8.2).** La cadena hardware del Módulo 2 fue validada empíricamente el 2026-05-06 mediante el protocolo de antena corporal documentado en la Iteración 8.2: tasa de muestreo real medida 498.5 Hz (objetivo 500 Hz, dentro de tolerancia), dominancia espectral del 82.4 % en el armónico de 60 Hz como firma diagnóstica de la integridad de la cadena diferencial (cable casero + shield Olimex + ADC + firmware Butterworth + serial). Esta validación habilita la sesión clínica final de OE-06 con sujetos reales, condicionada a la adquisición previa de gel conductor electrolítico recomendado por el docente asesor.
+
+---
+
+#### OE-07: Evaluación bajo ISO/IEC 25010:2023 (parcial)
+
+El séptimo objetivo específico exige evaluar el sistema integrado bajo el modelo de calidad del producto software ISO/IEC 25010:2023 [19]. La estrategia adoptada es construir una matriz de trazabilidad entre las nueve características de calidad del estándar y los artefactos del repositorio que constituyen evidencia objetiva de cumplimiento (archivos:líneas, métricas, comandos verificables), reservando para la sesión clínica final la recolección de los datos cuantitativos (encuesta SUS [20], cronómetro end-to-end, prueba de fallo controlado).
+
+El producto formal del OE-07 es el documento `OE-07_ISO25010_evidencia.md` ubicado en la raíz del repositorio, que recoge la matriz completa por subcaracterística. La justificación metodológica, el resumen de cobertura y el plan de recolección cuantitativa se encuentran detallados en la **Iteración 9** de la sección 1.1 del presente Pre Informe.
+
+**Estado de cobertura al 2026-05-06.** Cinco de las nueve características de ISO/IEC 25010:2023 están cubiertas con evidencia ya construida (Adecuación funcional, Compatibilidad, Seguridad, Mantenibilidad y Flexibilidad/Portabilidad). Cuatro están parcialmente cubiertas y dependen de mediciones de la sesión clínica final (Eficiencia de desempeño, Usabilidad, Confiabilidad y Seguridad operacional/Safety). Ninguna característica queda sin evidencia inicial, lo que permite afirmar que el OE-07 está conceptualmente cubierto y operativamente listo para su cierre cuantitativo durante la fase final del despliegue.
+
 ---
 
 ### Iteración 7 — Sprint 3 de Despliegue (SCRUM): Validación e integración del Módulo 1 sobre hardware real (2026-05-03 / 2026-05-04)
@@ -504,6 +520,151 @@ Bajo este protocolo, el dictamen del Módulo 1 deja de depender del valor absolu
 
 ---
 
+### Iteración 8 — Sprint 4 de Despliegue (SCRUM): Calibración personal de M1 y validación de la cadena hardware EMG (2026-05-04 / 2026-05-06)
+
+Esta iteración corresponde al cuarto sprint de la **fase de Despliegue del modelo CRISP-DM**. El sprint goal se compone de dos objetivos derivados de las iteraciones previas: (i) cerrar el OE-04 implementando la calibración personalizada del Módulo 1 motivada en la tarea 7.5, y (ii) validar empíricamente la cadena de adquisición del Módulo 2 sobre el hardware real (Olimex SHIELD-EKG-EMG + Arduino UNO + cable casero) para habilitar la posterior captura clínica con sujetos reales.
+
+**Tareas del sprint:**
+- 8.1 Implementación cross-stack del baseline personal de somnolencia (M1)
+- 8.2 Validación funcional de la cadena hardware del Módulo 2 (EMG) sin contacto con piel
+- 8.3 Cierre operativo y trabajo pendiente para captura clínica
+
+---
+
+#### 8.1 Implementación cross-stack del baseline personal de somnolencia (M1)
+
+A partir de la motivación cuantitativa establecida en la tarea 7.5 (probabilidad de somnolencia mayor en estado alerta declarado que en estado de sueño declarado, debido a geometría facial OOD a +4.1σ del train mean del DDD), se implementó la calibración personal para el Módulo 1 siguiendo el protocolo enunciado en 7.5: persistencia del escalar `p_somnolencia_baseline` por médico y aplicación de la corrección $P_\text{ef} = \max(0, P_\text{obs} - P_\text{baseline})$ antes de la fusión tardía del Módulo 3.
+
+**Decisión de diseño — tabla independiente.** Se optó por una tabla `baselines_somnolencia` separada de la tabla `baselines_emg` ya existente, en lugar de extender esta última con una columna nullable. La razón es de **modificabilidad** (ISO/IEC 25010:2023 — Mantenibilidad): cada tipo de baseline tiene su propio ciclo de captura y permisos (`baseline_somnolencia:registrar|ver_propios|ver_todos`), y la separación elimina la dependencia entre el flujo de calibración EMG y el flujo de calibración M1 cuando se ejecuten en sesiones diferentes.
+
+**Componentes implementados.**
+
+| Capa | Componente | Archivo |
+|---|---|---|
+| BD | DDL completa (tabla + índices + permisos + asignaciones a roles) | `backend/DDL/07_baselines_somnolencia.sql` |
+| Backend (modelo) | `BaselineSomnolencia` con `AuditMixin` | `backend/app/models/baseline_somnolencia.py` |
+| Backend (DTOs) | `BaselineSomnolenciaIn/Out`, `CalibracionIniciarRequest`, `CalibracionResultado` | `backend/app/dtos/baseline_somnolencia_dto.py` |
+| Backend (services) | `BaselineSomnolenciaService` (CRUD), `CalibracionService` (orquesta subprocess) | `backend/app/services/baseline_somnolencia_service.py`, `backend/app/services/calibracion_service.py` |
+| Backend (routers) | `GET/POST /baselines/somnolencia`, `GET /baselines/somnolencia/activo`, `POST /calibracion/somnolencia/iniciar` | `backend/app/routers/baseline_somnolencia_router.py`, `backend/app/routers/calibracion_router.py` |
+| Local | Flag CLI `--calibracion-m1` en `local/main.py` con marcador `===CALIBRACION_RESULT===` para parsing del subprocess | `local/main.py` |
+| Local | Fusión tardía con corrección por baseline en `m3_fusion.py` (`fusionar(p_somnolencia_baseline=...)`) | `local/modules/m3_fusion.py` |
+| Frontend | Página `Calibracion.tsx` con instrucciones, parámetros y botón "Iniciar calibración" | `frontend/src/pages/Calibracion.tsx` |
+| Frontend | Cliente `baselineSomnolencia.api.ts` y tipos en `types/index.ts` | `frontend/src/api/baselineSomnolencia.api.ts` |
+| Frontend | Ruta `/calibracion` protegida por permiso `baseline_somnolencia:registrar` y entrada en sidebar | `frontend/src/components/Layout.tsx` |
+
+**Patrón técnico — subprocess síncrono envuelto en `asyncio.to_thread`.** La invocación de `local/main.py --calibracion-m1` desde el backend FastAPI se ejecuta con `subprocess.run` síncrono envuelto en `asyncio.to_thread(...)` en lugar de `asyncio.create_subprocess_exec`. La razón es técnica: en Windows con uvicorn (en particular con `--reload`), el event loop activo termina siendo `SelectorEventLoop` independientemente de que `local/main.py` declare `WindowsProactorEventLoopPolicy`, lo que hace que `subprocess_exec` lance `NotImplementedError`. El patrón adoptado es portable a Linux (Raspberry Pi 5) sin modificación. La ruta del intérprete Python del entorno `local/.venv` se resuelve dinámicamente vía `Settings.resolver_python_local()`, evitando `ImportError` de `cv2`/`mediapipe` cuando el backend usa un venv distinto.
+
+**Concurrencia.** Las operaciones de calibración M1, calibración EMG y evaluación auto comparten el recurso físico cámara/Arduino. Se utiliza un `asyncio.Lock` global por flujo (`_calibracion_lock`, `_evaluacion_lock`) y un timeout duro `Settings.calibracion_timeout_s = 90s`. Si dos peticiones intentan solapar, la segunda recibe HTTP 409 inmediatamente, evitando contención sobre el dispositivo USB.
+
+**Validación numérica del fusor M3 con corrección por baseline.** Se construyó un escenario de prueba con valores controlados:
+
+| Escenario | $P_\text{obs}$ | $P_\text{baseline}$ | $P_\text{ef}$ | $P_\text{fatiga}$ | $P_\text{total}$ | Dictamen |
+|---|---:|---:|---:|---:|---:|---|
+| Sin calibración (autor en estado alerta, OOD) | 0.96 | — | 0.96 | 0.30 | 0.564 | NO_APTO (falso positivo) |
+| Con calibración (mismo autor, baseline=0.92) | 0.96 | 0.92 | 0.04 | 0.30 | 0.196 | **APTO** ✅ |
+| Con calibración (autor con somnolencia real) | 0.99 | 0.92 | 0.07 | 0.55 | 0.358 | ATENCIÓN |
+
+El primer caso reproduce numéricamente la patología documentada en la tarea 7.5: un sujeto OOD recibe dictamen NO_APTO sin estar fatigado. Tras incorporar el baseline personal (segundo caso), la $P_\text{efectiva}$ cae a 0.04, el dictamen pasa a APTO y la traza queda registrada en el campo `justificacion` del `ResultadoFusion`. El tercer caso evidencia que la corrección no enmascara estados de fatiga reales: si la $P_\text{obs}$ se eleva por encima del baseline personal del sujeto, la $P_\text{efectiva}$ aumenta proporcionalmente.
+
+**Cierre del OE-04.** Con esta implementación, el OE-04 queda **cerrado conceptual y técnicamente**: las métricas de precisión, sensibilidad y especificidad reportadas para la Estrategia A (notebook `Modulo1_CNN_LSTM_ViT_v6_RUN_ALL_RESULTADOS.ipynb`) se complementan en producción con un mecanismo de personalización por sujeto que mitiga la limitación inherente de subject-dependence. El cierre cuantitativo final con datos reales de NOR VISIÓN se contempla bajo OE-06.
+
+---
+
+#### 8.2 Validación funcional de la cadena hardware del Módulo 2 (EMG) sin contacto con piel
+
+El Módulo 2 (EMG sobre trapecio superior) requiere captura física con electrodos adheridos a la piel del sujeto. Antes de cualquier sesión clínica, fue necesario validar que la cadena completa de adquisición —cable diferencial, shield Olimex, ADC del Arduino, firmware con filtrado Butterworth y transmisión serial— opera correctamente, sin recurrir a la sujeción dolorosa de los electrodos sobre piel desnuda.
+
+**Hardware utilizado.**
+
+- **Sensor:** Olimex SHIELD-EKG-EMG (ganancia ×1000 calibrada de fábrica, factor 4.883 µV/cuenta para el ADC de 10 bits del UNO con Vref=5V, factory-set TR1 sin tocar) apilado físicamente sobre el Arduino UNO.
+- **Microcontrolador:** Arduino UNO (ATmega328P, 16 MHz). Firmware propio en C++ (`local/arduino/vigilanceai_emg/vigilanceai_emg.ino`): muestreo a 500 Hz reales mediante temporización por `micros()`, filtrado Butterworth orden 4 banda 20–200 Hz en cascada de dos secciones bicuadráticas Direct Form II Transposed, transmisión serial 115200 baud en formato CSV `<ms>,<uV>`.
+- **Cable de electrodos:** confección casera con plug TRS y tres pinzas tipo cocodrilo (rojo, blanco, negro). Por inspección visual del docente sobre la soldadura del jack se confirmó que el conductor blanco está soldado al sleeve, lo que implica **blanco = DRL (Driven-Right-Leg)**; rojo y negro forman el par diferencial IN+/IN−.
+
+**Defecto detectado y corregido en firmware.** Una versión previa del firmware contenía una sentencia `delay(10000)` espuria al final del `loop()`, lo que reducía la tasa de muestreo efectiva a 0.1 Hz y rompía el supuesto de fs=500 Hz sobre el que está calibrada la cadena. La sentencia se eliminó; tras reflashear, el script `local/test_emg.py --duracion 3` reportó **fs real = 498.5 Hz** (desviación < 0.4 % respecto al objetivo nominal de 500 Hz, dentro del margen de tolerancia esperado por el oscilador interno del UNO).
+
+**Protocolo de validación sin contacto con piel.** Se diseñó un protocolo de validación que aprovecha la propiedad del cuerpo humano como antena receptora del campo electromagnético de la red eléctrica de 60 Hz, sin necesidad de adherir electrodos al sujeto:
+
+1. **Test de antena corporal**: se sostiene la chapa metálica del cocodrilo rojo con los dedos de la mano derecha y la del cocodrilo negro con los dedos de la mano izquierda; el blanco se deja al aire. El cuerpo del sujeto acopla la red eléctrica como modo común; el shield Olimex amplifica diferencialmente IN+/IN− referidos al DRL flotante. Si la cadena hardware está completa y bien soldada, la captura debe presentar **dominancia espectral del armónico de 60 Hz**, dado que el filtrado Butterworth banda 20–200 Hz lo deja pasar.
+
+**Resultado de la captura de validación (2026-05-06).**
+
+| Métrica | Valor obtenido | Criterio | Veredicto |
+|---|---:|---|---|
+| FS real | 498.5 Hz | objetivo 500 Hz, tolerancia ±10 % | ✅ |
+| N° de muestras en 3 s | 1496 | esperado ~1500 | ✅ |
+| Media | 2.6 µV | esperado ≈ 0 (sin offset DC) | ✅ |
+| `stdev` | 1996.1 µV | esperado alto en antena | ✅ |
+| Min..Max | −7734.0 .. 8954.5 µV | dentro del rango del IIR (overshoot esperado por saturación del shield) | ✅ |
+| **Fracción de potencia espectral en 58–62 Hz** | **82.4 %** | **decisivo para validar diferencial** | ✅ |
+
+La dominancia del 82.4 % de la potencia espectral concentrada en el armónico de 60 Hz constituye la firma decisiva de que el shield Olimex está midiendo correctamente la diferencia IN+/IN− referida al DRL: si la soldadura del cable casero hubiera invertido o mezclado los conductores, esta dominancia no se manifestaría y el espectro sería de banda ancha sin pico característico.
+
+**Componentes validados con esta prueba:**
+
+- ADC del Arduino UNO (lectura sobre A0).
+- Etapa diferencial del shield Olimex (instrumentation amplifier ×1000 + filtros analógicos del frontend).
+- Soldadura del cable casero: rojo y negro como par diferencial, blanco como DRL.
+- Firmware: muestreo a 500 Hz reales y filtro Butterworth banda 20–200 Hz operando en tiempo real.
+- Transmisión serial 115200 baud sin pérdida de muestras.
+
+Esta validación completa la cadena hardware del Módulo 2 sin necesidad de exponer al sujeto a la incomodidad prolongada de electrodos adheridos sobre piel. La prueba está documentada en `local/test_emg.py` y es reproducible en cualquier estación con el hardware conectado.
+
+---
+
+#### 8.3 Cierre operativo y trabajo pendiente para captura clínica
+
+Tras las tareas 8.1 y 8.2, el sistema VigilanceAI tiene operativos todos sus subsistemas software y la cadena hardware del Módulo 2 está validada funcionalmente. La sesión clínica final con sujetos reales en NOR VISIÓN requiere los siguientes pasos, ya delimitados:
+
+1. **Adquisición de gel conductor electrolítico.** Indicación expresa del docente asesor: la limpieza de piel únicamente con alcohol isopropílico no es suficiente para garantizar baja impedancia piel-electrodo durante la captura sostenida. Se requiere gel conductor de tipo electrolítico (clase comercial análoga a Signa Gel o Ten20, o gel ECG/EEG genérico de distribuidor médico). Fundamento técnico: el alcohol desengrasa la piel pero se evapora en segundos, dejando subir nuevamente la impedancia y permitiendo la contaminación por modo común de 60 Hz; el gel mantiene una capa electrolítica estable que conserva la impedancia baja durante toda la captura, mejorando la relación señal/ruido del EMG sostenido.
+2. **Sesión de captura del baseline EMG personal del médico** (~30–60 s en reposo, sentado, hombro relajado). Persiste en `baselines_emg` por el flujo ya implementado en iteraciones previas.
+3. **Sesión de calibración M1** (30 s en estado alerta, frente a la cámara). Persiste en `baselines_somnolencia` por el flujo cerrado en la tarea 8.1.
+4. **Evaluación pre-operatoria** completa (RF-01, RF-02): captura paralela de 30 s con cámara y Arduino, M1+M2+M3, dictamen APTO/ATENCIÓN/NO_APTO con justificación.
+5. **Recolección de evidencia para OE-07** durante esa misma sesión: cronómetro end-to-end, encuesta SUS al médico, prueba de fallo controlado (apagar backend a la mitad de la captura).
+
+El cierre del Pre Informe oficial se contempla con los datos cuantitativos de los pasos 4 y 5; los demás pasos quedan documentados como evidencia cualitativa y reproducible.
+
+---
+
+### Iteración 9 — Sprint 5 de Despliegue (SCRUM): Evaluación del sistema bajo ISO/IEC 25010:2023 (OE-07) (2026-05-06)
+
+Esta iteración corresponde al quinto sprint de la **fase de Despliegue del modelo CRISP-DM** y al cumplimiento del séptimo objetivo específico del Pre Informe (OE-07). El sprint goal es: *evaluar el sistema integrado contra el modelo de calidad del producto software ISO/IEC 25010:2023 [19], trazando cada característica de calidad a evidencia concreta del repositorio (archivo:líneas, comandos verificables) y reservando para una sesión clínica posterior la recolección cuantitativa final (encuesta SUS, cronómetro, prueba de fallo).*
+
+El producto principal de esta iteración es el documento `OE-07_ISO25010_evidencia.md` en la raíz del repositorio, que constituye el insumo formal para la evaluación. La presente sección resume su contenido y la justificación metodológica.
+
+**Alcance de la evaluación.** Backend (FastAPI + PostgreSQL 16) + Frontend (React 19 + TypeScript + Tailwind + Zustand) + módulos locales (`local/`, scripts del sistema embebido). Se excluye explícitamente del OE-07 la evaluación clínica del rendimiento predictivo del modelo M1, que ya quedó cubierta en OE-04 e Iteración 7.
+
+**Modelo de calidad utilizado.** ISO/IEC 25010:2023 define ocho características de calidad del producto software más una novena de **seguridad operacional** (Safety), incorporada por la revisión 2023 [19]. Cada característica se descompone en subcaracterísticas evaluables. La evaluación del presente sistema se aborda mediante una matriz de trazabilidad: cada subcaracterística se vincula a uno o más artefactos del repositorio que constituyen evidencia objetiva, complementada con métricas cuantitativas donde aplica.
+
+**Resumen de cobertura por característica.**
+
+| Característica (ISO/IEC 25010:2023) | Estado | Evidencia principal | Esfuerzo restante |
+|---|---|---|---|
+| Adecuación funcional | ✅ Cubierto | RF-01..18 trazados a archivos:líneas; modelo M1 desplegado; validación numérica del fusor M3 | Bajo (cierre con tabla final) |
+| Eficiencia de desempeño | 🟡 Parcial | Latencia BiLSTM 0.11 ms/imagen; cámara 57.6 fps reales; subprocess sin bloqueo del event loop | Medio (cronómetro end-to-end durante sesión clínica) |
+| Compatibilidad | ✅ Cubierto | REST stateless, OpenAPI 3.1, RNF-10 (Chromium ≥ 120), envelope `ApiResponse<T>` uniforme | Bajo (matriz manual Chrome/Edge/Firefox) |
+| Interacción / Usabilidad | 🟡 Parcial | Sidebar filtrado por permisos; flujo lineal Login → Calibración → Iniciar Evaluación; ≤ 3 clics; semáforo APTO/ATENCIÓN/NO_APTO con texto explicativo (no solo color) | Medio-Alto (encuesta SUS a 5 médicos) |
+| Confiabilidad | 🟡 Parcial | Persistencia local en `resultado_sin_enviar.json` si el backend cae; redistribución de pesos de M2 si EMG falla; manejo de `TimeoutError`/`FileNotFoundError`/`JSONDecodeError`; **cadena hardware EMG validada (Iter. 8.2, fs 498.5 Hz, 60 Hz dominante 82.4 %)** | Medio (prueba de fallo controlada con captura de evidencia) |
+| Seguridad | ✅ Cubierto | bcrypt; UUID v4 (anti-enumeración); JWT HS256 con permisos embebidos y expiración 60 min; RBAC con `require_permission()` (38 ocurrencias); auditoría persistente en `auditoria_log` vía trigger PostgreSQL `fn_auditoria()`; sesiones plain/audited segregadas; CLI args (no shell) para reenvío de JWT al subprocess | Bajo (capturas de pruebas de penetración) |
+| Mantenibilidad | ✅ Cubierto | Backend en 5 capas (`routers/`, `services/`, `models/`, `dtos/`, `utils/`); frontend modular; LOC ≈ 2 100 backend + 2 100 frontend; reglas M2 declarativas; reutilización del patrón subprocess entre calibración y evaluación | Bajo (diagrama de capas) |
+| Flexibilidad / Portabilidad | ✅ Cubierto a nivel arquitectónico | 100 % de configuración por env vars; `Settings.resolver_python_local()` auto-detecta venv local; arquitectura RNF-12 que permite sustituir la unidad embebida sin tocar backend ni frontend; subprocess pattern portable Windows/Linux | Medio (demo opcional en Raspberry Pi 5) |
+| Seguridad operacional (Safety) | 🟡 Parcial | Dictamen no prescriptivo ("Se recomienda…"); fail-safe rPPG con gate de calidad (`QC_RMSSD_SDNN_MAX = 1.4`); fail-safe EMG con redistribución de pesos; aviso explícito si no hay calibración personal; timeout duro al subprocess; subject-dependence declarada y mitigada con calibración M1 (Iter. 8.1) | Medio (declaración formal de limitación clínica en manual de usuario) |
+
+**Síntesis de la evaluación.** Cinco de las nueve características están cubiertas con evidencia ya construida (Adecuación funcional, Compatibilidad, Seguridad, Mantenibilidad y Flexibilidad/Portabilidad). Cuatro están parcialmente cubiertas y dependen de mediciones a recolectar durante la sesión clínica final (Eficiencia de desempeño, Usabilidad, Confiabilidad y Safety). Ninguna característica queda sin evidencia inicial.
+
+**Plan de evaluación pendiente (cierre cuantitativo).**
+
+1. **Encuesta SUS** (System Usability Scale, 10 ítems Likert) [20] aplicada a 5 médicos del consultorio NOR VISIÓN tras una sesión completa de uso. Métrica de salida: score ∈ [0, 100]; objetivo conservador ≥ 70 (umbral aceptable según la literatura de SUS [20]).
+2. **Cronómetro end-to-end** durante 5 evaluaciones consecutivas → confirmación cuantitativa del RNF-01 (procesamiento ≤ 10 s aparte de los 30 s de captura).
+3. **Prueba de fallo controlado**: detener el backend a mitad de una evaluación → evidencia (captura de pantalla) de la persistencia local en `resultado_sin_enviar.json`.
+4. **Matriz de compatibilidad de navegadores**: ejecutar el frontend en Chrome ≥ 120, Edge ≥ 120 y Firefox ≥ 121 → captura de pantalla por navegador.
+5. **Demo de portabilidad (opcional)**: ejecutar `local/main.py` en una Raspberry Pi 5, sin tocar backend ni frontend, recibiendo el dictamen por la API REST → screenshot del dictamen recibido. Esta tarea es de alto esfuerzo y solo se contempla si el cronograma lo permite tras los cuatro pasos anteriores.
+
+Una vez recogida esta evidencia, se construirá la **tabla final de cumplimiento ISO/IEC 25010:2023** con score por característica y se incorporará al Pre Informe oficial como cierre del OE-07.
+
+**Trazabilidad.** El detalle por subcaracterística, con archivos:líneas y comandos verificables, se encuentra en el documento `OE-07_ISO25010_evidencia.md` en la raíz del repositorio. La presente sección resume el panorama; el documento referenciado provee la matriz completa.
+
+---
+
 ## II. REFERENCIAS BIBLIOGRÁFICAS
 
 Las referencias se presentan en estilo IEEE.
@@ -543,6 +704,10 @@ Las referencias se presentan en estilo IEEE.
 [17] W. Wang, A. C. den Brinker, S. Stuijk, y G. de Haan, «Algorithmic Principles of Remote PPG», *IEEE Trans. Biomed. Eng.*, vol. 64, n.° 7, pp. 1479–1491, jul. 2017, doi: 10.1109/TBME.2016.2609282.
 
 [18] G. de Haan y V. Jeanne, «Robust Pulse Rate From Chrominance-Based rPPG», *IEEE Trans. Biomed. Eng.*, vol. 60, n.° 10, pp. 2878–2886, oct. 2013, doi: 10.1109/TBME.2013.2266196.
+
+[19] International Organization for Standardization, *ISO/IEC 25010:2023 — Systems and software engineering — Systems and software Quality Requirements and Evaluation (SQuaRE) — Product quality model*, 2.ª ed., Ginebra, Suiza: ISO, 2023.
+
+[20] J. Brooke, «SUS: A "quick and dirty" usability scale», en *Usability Evaluation in Industry*, P. W. Jordan, B. Thomas, B. A. Weerdmeester y I. L. McClelland, eds., London, U.K.: Taylor & Francis, 1996, pp. 189–194.
 
 ---
 

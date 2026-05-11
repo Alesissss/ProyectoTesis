@@ -55,7 +55,14 @@
       "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); paths=[p for p in d['paths'] if 'dispositivo' in p or 'camara' in p]; print\\(paths\\)\")",
       "Bash(curl -s -m 5 http://localhost:5173/api/dispositivos/camaras)",
       "Bash(curl -s -m 60 -H \"Content-Type: application/json\" -d '{\"correo\":\"admin@vigilanceai.com\",\"contrasena\":\"admin\"}' http://localhost:8000/auth/login)",
-      "Bash(.venv/Scripts/python.exe *)"
+      "Bash(.venv/Scripts/python.exe *)",
+      "WebFetch(domain:www.olimex.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.openeeg.org)",
+      "WebFetch(domain:www.google.com)",
+      "WebFetch(domain:www.farnell.com)",
+      "WebFetch(domain:manualzz.com)",
+      "WebFetch(domain:usermanual.wiki)"
     ]
   }
 }
