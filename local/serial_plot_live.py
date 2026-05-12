@@ -147,7 +147,10 @@ def main() -> int:
     t_eje = np.linspace(-VENTANA_S, 0, N_VENTANA)
     line_raw, = ax_raw.plot(t_eje, np.zeros(N_VENTANA), lw=0.8, color="tab:blue")
     line_filt, = ax_filt.plot(t_eje, np.zeros(N_VENTANA), lw=0.8, color="tab:green")
-    line_fft, = ax_fft.plot([], [], lw=0.8, color="tab:red")
+    # Seed con un punto positivo para evitar que log-scale truene en tight_layout
+    f_seed = np.fft.rfftfreq(N_VENTANA, d=1.0 / FS)
+    pwr_seed = np.full_like(f_seed, 1.0)
+    line_fft, = ax_fft.plot(f_seed, pwr_seed, lw=0.8, color="tab:red")
     band_60, = ax_fft.plot([], [], lw=0.0, marker="o", color="black", markersize=4)
 
     ax_raw.set_title("Señal cruda (ADC)")
@@ -164,6 +167,7 @@ def main() -> int:
     ax_fft.set_ylabel("Potencia (log)")
     ax_fft.set_xlim(0, 250)
     ax_fft.set_yscale("log")
+    ax_fft.set_ylim(1e-1, 1e3)  # rango inicial seguro antes de tight_layout
     ax_fft.grid(alpha=0.3, which="both")
     ax_fft.axvspan(58, 62, alpha=0.15, color="red", label="banda 60 Hz")
     ax_fft.legend(loc="upper right")
