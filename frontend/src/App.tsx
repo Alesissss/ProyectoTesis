@@ -4,7 +4,7 @@ import Dashboard from './pages/Dashboard'
 import EvaluacionAuto from './pages/EvaluacionAuto'
 import EvaluacionDetalle from './pages/EvaluacionDetalle'
 import MisEvaluaciones from './pages/MisEvaluaciones'
-import Administracion from './pages/Administracion'
+import Usuarios from './pages/Usuarios'
 import Calibracion from './pages/Calibracion'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -44,12 +44,12 @@ export default function App() {
               <Route index element={<MisEvaluaciones />} />
             </Route>
             <Route
-              path="/administracion"
+              path="/usuarios"
               element={
                 <ProtectedRoute requiredPermiso="usuario:gestionar" />
               }
             >
-              <Route index element={<Administracion />} />
+              <Route index element={<Usuarios />} />
             </Route>
           </Route>
         </Route>

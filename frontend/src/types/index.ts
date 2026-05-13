@@ -203,11 +203,29 @@ export interface CalibracionIniciarRequest {
   duracion_s?: number
   camera_profile?: string | null
   camara_id?: number | null
+  puerto_arduino?: string | null
+}
+
+// Coincide con BaselineM2Resumen del backend
+export interface BaselineM2Resumen {
+  id_baseline?: string | null
+  rms_emg?: number | null
+  freq_mediana?: number | null
+  freq_media?: number | null
+  sdnn?: number | null
+  rmssd?: number | null
+  pnn50?: number | null
+  emg_valido: boolean
+  emg_ratio_60hz?: number | null
+  emg_motivo?: string | null
+  arduino_detectado: boolean
+  n_muestras_emg: number
 }
 
 // Coincide con CalibracionResultadoResponse del backend
 export interface CalibracionResultado {
   baseline: BaselineSomnolencia
+  baseline_m2?: BaselineM2Resumen | null
   duracion_real_s: number
   frames_procesados: number
   ventanas_inferidas: number

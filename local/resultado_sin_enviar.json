@@ -1,0 +1,59 @@
+{
+  "p_somnolencia": 0.9715,
+  "p_fatiga_fisiologica": 0.0,
+  "p_total": 0.3886,
+  "dictamen": "NO_APTO",
+  "umbral_usado": 0.35,
+  "duracion_captura_s": 30,
+  "features_conductuales": {
+    "ear_promedio": 0.5451,
+    "mar_promedio": 0.0076,
+    "ear_std": 0.1426,
+    "mar_std": 0.0027,
+    "video_duration_s": 30.07,
+    "frames_con_cara": 1232,
+    "frames_totales": 1522,
+    "tasa_deteccion_facial": 0.8095,
+    "parpadeos": 10,
+    "ventanas_bilstm": 243,
+    "rppg_frames": 1232,
+    "rppg_metodo": "POS",
+    "fps_observado": 40.97
+  },
+  "features_emg": {
+    "rms": null,
+    "freq_mediana": null,
+    "freq_media": null,
+    "n_muestras": 0,
+    "reglas_m2": {
+      "rms_incremento": 0.0,
+      "rms_decremento": 0.0,
+      "freq_mediana": 0.0,
+      "freq_media": 0.0,
+      "sdnn": 0.0,
+      "rmssd": 0.0,
+      "pnn50": 0.0
+    }
+  },
+  "features_hrv": {
+    "sdnn": 88.88,
+    "rmssd": 121.18,
+    "pnn50": 64.29,
+    "hr_bpm": 77.8,
+    "n_picos": 33,
+    "rr_n_raw": 32,
+    "rr_n": 15,
+    "rr_rechazados": 17,
+    "ratio_rmssd_sdnn": 1.363,
+    "calidad": "alta",
+    "metodo": "POS (Wang 2017) + filtro clínico RR ±20% mediana"
+  },
+  "metadatos": {
+    "fuente": "local_script",
+    "version_modelo_m1": "lstm_A_subjindep_best",
+    "camara": "GoPro Hero 11 Black (GoPro Webcam Utility)",
+    "puerto_arduino": "COM5",
+    "baseline_id": null,
+    "hrv_fuente": "rppg_camara"
+  }
+}

@@ -99,20 +99,22 @@ async def _scan_subproceso() -> list[dict]:
     except subprocess.TimeoutExpired:
         raise HTTPException(
             status.HTTP_504_GATEWAY_TIMEOUT,
-            f"El escaneo de cámaras excedió "
-            f"{settings.camaras_listado_timeout_s} s.",
+            "La búsqueda de cámaras tardó demasiado. Verifica que las cámaras "
+            "estén conectadas e intenta nuevamente.",
         )
     except FileNotFoundError as exc:
+        logger.exception("Script local no encontrado: %s", exc)
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
-            f"No se encontró el script de captura: {exc}",
+            "No fue posible iniciar la búsqueda de cámaras. "
+            "Contacta al administrador del sistema.",
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("Falla inesperada al lanzar subprocess de listado")
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
-            f"Falla al lanzar el subprocess de cámaras: "
-            f"{type(exc).__name__}: {exc}",
+            "No fue posible buscar las cámaras conectadas. "
+            "Contacta al administrador del sistema.",
         )
 
     stdout = completed.stdout.decode("utf-8", errors="replace")
@@ -125,36 +127,27 @@ async def _scan_subproceso() -> list[dict]:
             "Subproceso de listado falló (code=%s).\n  python=%s\n  cwd=%s\n  stderr completo:\n%s",
             completed.returncode, python_exe, str(local_main.parent), stderr,
         )
-        ultimo = stderr.strip().splitlines()[-1] if stderr.strip() else "sin detalle"
-        # Pista común para el usuario: si hay ModuleNotFoundError, el python
-        # del subprocess está mal — necesita el venv de local/.
-        pista = ""
-        if "ModuleNotFoundError" in stderr or "No module named" in stderr:
-            pista = (
-                " | Pista: el subprocess está usando un Python sin las "
-                "dependencias de local/. Verifique que existe `local/.venv/` "
-                "(crear con `cd local && py -3.11 -m venv .venv && "
-                ".venv\\Scripts\\Activate.ps1 && pip install -r requirements.txt`)."
-            )
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
-            f"El escaneo de cámaras falló (código {completed.returncode}). Detalle: {ultimo}{pista}",
+            "No fue posible obtener la lista de cámaras conectadas. "
+            "Verifica que las cámaras estén enchufadas y reintenta.",
         )
 
     idx = stdout.rfind(CAMARAS_RESULT_MARKER)
     if idx < 0:
-        logger.error("Marcador no encontrado. Salida: %s", stdout[-500:])
+        logger.error("Marcador no encontrado. stderr=%s. stdout-tail=%s",
+                     stderr[-1000:], stdout[-500:])
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "El subproceso no emitió el listado de cámaras esperado.",
+            "El sistema no logró leer la lista de cámaras. Reintenta en unos segundos.",
         )
 
     json_str = stdout[idx + len(CAMARAS_RESULT_MARKER):].strip()
     try:
         return json.loads(json_str)
-    except json.JSONDecodeError as exc:
-        logger.exception("JSON malformado")
+    except json.JSONDecodeError:
+        logger.exception("JSON malformado en listado de cámaras")
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
-            f"Listado de cámaras malformado: {exc}",
+            "La lista de cámaras devuelta por el sistema no se pudo interpretar.",
         )

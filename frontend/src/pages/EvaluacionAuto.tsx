@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { iniciarEvaluacion } from '../api/evaluaciones.api'
 import CameraSelector from '../components/CameraSelector'
+import CameraPreview from '../components/CameraPreview'
 import Semaforo from '../components/Semaforo'
 import type { Dictamen, EvaluacionIniciarResultado } from '../types'
 
@@ -54,6 +55,11 @@ export default function EvaluacionAuto() {
           del Arduino. El sistema fusiona M1 (visión) + M2 (fisiológico) y emite el
           dictamen final del Módulo 3.
         </p>
+      </div>
+
+      {/* Previsualización de cámara */}
+      <div className="mb-6">
+        <CameraPreview paused={step === 'loading'} />
       </div>
 
       {/* Parámetros */}

@@ -48,16 +48,36 @@ class CalibracionIniciarRequest(BaseModel):
     # presente, este índice prevalece sobre el del perfil; útil cuando hay dos
     # cámaras del mismo modelo conectadas.
     camara_id: Optional[int] = Field(default=None, ge=0, le=10)
+    # Puerto serie del Arduino sEMG para calibrar M2 (EMG) en paralelo.
+    # None → auto-detección; "skip" o cadena vacía manejada por el script.
+    puerto_arduino: Optional[str] = Field(default=None)
+
+
+class BaselineM2Resumen(BaseModel):
+    """Resumen del baseline fisiológico M2 emitido en la calibración."""
+    id_baseline: Optional[uuid.UUID] = None
+    rms_emg: Optional[float] = None
+    freq_mediana: Optional[float] = None
+    freq_media: Optional[float] = None
+    sdnn: Optional[float] = None
+    rmssd: Optional[float] = None
+    pnn50: Optional[float] = None
+    emg_valido: bool = False
+    emg_ratio_60hz: Optional[float] = None
+    emg_motivo: Optional[str] = None
+    arduino_detectado: bool = False
+    n_muestras_emg: int = 0
 
 
 class CalibracionResultadoResponse(BaseModel):
     """Estructura devuelta tras una calibración exitosa.
 
-    Incluye el baseline persistido y las métricas crudas reportadas por el
-    proceso `local/main.py --calibracion-m1`, así para que la UI las pueda
-    mostrar al médico inmediatamente sin re-fetchear.
+    Incluye AMBOS baselines (M1 y M2) capturados en el mismo intervalo,
+    además de métricas crudas para que la UI los muestre al médico
+    inmediatamente sin re-fetchear.
     """
-    baseline: BaselineSomnolenciaResponse
+    baseline: BaselineSomnolenciaResponse          # M1 (visión)
+    baseline_m2: Optional[BaselineM2Resumen] = None  # M2 (EMG + HRV)
     duracion_real_s: float
     frames_procesados: int
     ventanas_inferidas: int

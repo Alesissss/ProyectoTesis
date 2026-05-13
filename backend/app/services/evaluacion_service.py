@@ -120,53 +120,62 @@ class EvaluacionService:
         current_user: TokenData,
         bearer_token: str,
     ) -> EvaluacionIniciarResultado:
-        """Dispara `local/main.py` por subprocess, espera su salida JSON con
-        el id de la evaluación recién creada, y devuelve la evaluación
-        completa al frontend.
-
-        Mismo patrón que CalibracionService.iniciar_calibracion_m1, pero el
-        backend NO re-registra la evaluación: el script local ya la POSTea
-        a `/evaluaciones` con su propio token y el backend solo la lee.
+        """Dispara `local/main.py` por subprocess (con --no-post), recibe el
+        payload de evaluación calculado y lo persiste él mismo. Single source
+        of truth: el subprocess solo computa; la BD la toca exclusivamente
+        este service.
         """
         if _evaluacion_lock.locked():
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                "Ya hay una evaluación en curso. Espera a que termine.",
+                "Ya se está realizando una evaluación en este momento. "
+                "Espera a que termine antes de iniciar otra.",
             )
 
         async with _evaluacion_lock:
             datos = await self._ejecutar_subproceso(request, bearer_token)
 
-        # ── Liveness: el subproceso rechaza la captura ANTES de POSTear ──────
+        # ── Liveness: el subproceso rechaza la captura ANTES de calcular ─────
         # Si el local detectó cámara apuntando a la nada, foto estática, o
         # señal rPPG sin perfusión, NO hay evaluación en BD: traducimos a 422.
         if datos.get("liveness_ok") is False:
             razones = datos.get("razones_liveness", [])
-            mensaje = "Captura inválida: " + " | ".join(razones) if razones else \
-                      "La captura no superó la validación de liveness."
+            mensaje = (
+                "Captura inválida: " + " | ".join(razones)
+                if razones
+                else "No se detectó al sujeto frente a la cámara durante la captura. "
+                     "Verifica iluminación, posición y reintenta."
+            )
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, mensaje)
 
-        # El subprocess incluye `id_evaluacion` en el JSON tras POST exitoso.
-        id_eval_str = datos.get("id_evaluacion")
-        if not id_eval_str:
+        # ── Persistir la evaluación a partir del payload del subprocess ──────
+        payload_eval = datos.get("payload_evaluacion")
+        if not isinstance(payload_eval, dict):
+            logger.error("Subprocess no devolvió payload_evaluacion: %s", datos)
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                "El script local completó la captura pero no pudo registrar la "
-                "evaluación en el backend. Revisar logs del subproceso.",
-            )
-        try:
-            id_eval = uuid.UUID(id_eval_str)
-        except (ValueError, TypeError):
-            raise HTTPException(
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-                f"id_evaluacion inválido devuelto por el subproceso: {id_eval_str!r}",
+                "La captura no produjo datos completos para registrar la evaluación. "
+                "Reintenta.",
             )
 
-        evaluacion = await db.get(Evaluacion, id_eval)
-        if not evaluacion:
+        try:
+            request_dto = EvaluacionRequest.model_validate(payload_eval)
+        except Exception:
+            logger.exception("Payload de evaluación inválido: %s", payload_eval)
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                "La evaluación reportada por el subproceso no existe en la BD.",
+                "Los datos de la evaluación no superaron la validación. "
+                "Reintenta la captura.",
+            )
+
+        evaluacion_resp = await self.registrar(db, request_dto, current_user)
+        evaluacion = await db.get(Evaluacion, evaluacion_resp.id_evaluacion)
+        if not evaluacion:
+            logger.error("Persistencia exitosa pero no se halla la evaluación recién creada")
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "La evaluación se procesó pero no se encontró en la base de datos. "
+                "Contacta al administrador.",
             )
 
         return EvaluacionIniciarResultado(
@@ -191,6 +200,7 @@ class EvaluacionService:
         cmd = [
             python_exe,
             str(local_main),
+            "--no-post",  # el backend persiste; el subprocess solo computa.
             "--token", bearer_token,
             "--duracion", str(request.duracion_s),
         ]
@@ -219,13 +229,15 @@ class EvaluacionService:
         except subprocess.TimeoutExpired:
             raise HTTPException(
                 status.HTTP_504_GATEWAY_TIMEOUT,
-                f"La evaluación excedió {settings.evaluacion_timeout_s} s.",
+                "La evaluación tardó más de lo esperado y se canceló. "
+                "Verifica la conexión de la cámara e intenta nuevamente.",
             )
         except FileNotFoundError as exc:
-            logger.exception("No se encontró el script local de evaluación")
+            logger.exception("No se encontró el script local de evaluación: %s", exc)
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                f"No se encontró el script de captura: {exc}",
+                "No fue posible iniciar la captura. "
+                "Contacta al administrador del sistema.",
             )
 
         stdout = completed.stdout.decode("utf-8", errors="replace")
@@ -233,30 +245,33 @@ class EvaluacionService:
 
         if completed.returncode != 0:
             logger.error("Subproceso de evaluación falló (code=%s). stderr=%s",
-                         completed.returncode, stderr[-500:])
-            ultimo = stderr.strip().splitlines()[-1] if stderr.strip() else "sin detalle"
+                         completed.returncode, stderr[-2000:])
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                f"La captura falló (código {completed.returncode}). Detalle: {ultimo}",
+                "Ocurrió un problema durante la captura. "
+                "Verifica la cámara y el Arduino, y reintenta.",
             )
 
         idx = stdout.rfind(EVALUACION_RESULT_MARKER)
         if idx < 0:
-            logger.error("Marcador %s no encontrado en stdout. Salida: %s",
-                         EVALUACION_RESULT_MARKER, stdout[-500:])
+            logger.error("Marcador %s no encontrado en stdout. stderr=%s. stdout-tail=%s",
+                         EVALUACION_RESULT_MARKER, stderr[-1000:], stdout[-500:])
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                "El subproceso no emitió el resultado de evaluación esperado.",
+                "La captura no produjo un resultado válido. "
+                "Reintenta verificando la cámara.",
             )
 
         json_str = stdout[idx + len(EVALUACION_RESULT_MARKER):].strip()
         try:
             data = json.loads(json_str)
-        except json.JSONDecodeError as exc:
-            logger.exception("JSON malformado en salida del subproceso")
+        except json.JSONDecodeError:
+            logger.exception("JSON malformado en salida del subproceso. stdout-tail=%s",
+                             stdout[-500:])
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                f"Resultado de evaluación malformado: {exc}",
+                "El resultado de la evaluación no se pudo interpretar. "
+                "Reintenta la captura.",
             )
         return data
 

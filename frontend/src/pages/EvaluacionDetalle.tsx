@@ -39,7 +39,7 @@ export default function EvaluacionDetalle() {
 
   const fc = evaluacion.features_conductuales as Record<string, number> | undefined
   const fEmg = evaluacion.features_emg as Record<string, unknown> | undefined
-  const fHrv = evaluacion.features_hrv as Record<string, number> | undefined
+  const fHrv = evaluacion.features_hrv as Record<string, unknown> | undefined
 
   // Tabla de reglas del sistema de inferencia difusa (M2).
   // Pesos definidos en local/modules/m2_reglas.py — espejo aquí solo para
@@ -138,6 +138,29 @@ export default function EvaluacionDetalle() {
             <h2 className="font-semibold text-slate-900 mb-4 text-sm uppercase tracking-wide">
               Features fisiológicas (M2)
             </h2>
+            {(() => {
+              const calidad = fEmg?.calidad as
+                | { valido?: boolean; ratio_60hz?: number; motivo?: string }
+                | undefined
+              if (calidad && calidad.valido === false) {
+                return (
+                  <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900">
+                    <p className="font-semibold mb-1">⚠ Señal EMG omitida del dictamen</p>
+                    <p>
+                      Motivo: {calidad.motivo ?? 'señal no válida'}
+                      {typeof calidad.ratio_60hz === 'number' &&
+                        ` (ruido 60 Hz: ${(calidad.ratio_60hz * 100).toFixed(1)}%)`}
+                      .
+                    </p>
+                    <p className="mt-1 text-amber-800/80">
+                      El dictamen se calculó con HRV (rPPG) únicamente. Revisa
+                      electrodos, gel conductor y batería del shield EMG.
+                    </p>
+                  </div>
+                )
+              }
+              return null
+            })()}
             <pre className="text-xs text-slate-600 font-mono overflow-x-auto whitespace-pre-wrap">
               {JSON.stringify({ emg: fEmg, hrv: fHrv }, null, 2)}
             </pre>
@@ -253,11 +276,11 @@ export default function EvaluacionDetalle() {
                 <p className="text-xs text-slate-400">≥ 0.005 (foto ≈ 0)</p>
               </div>
             )}
-            {fHrv?.calidad && (
+            {typeof fHrv?.calidad === 'string' && (
               <div>
                 <p className="text-xs uppercase tracking-wide text-slate-500">rPPG calidad</p>
                 <p className={`font-mono ${fHrv.calidad === 'alta' ? 'text-green-700' : 'text-amber-700'}`}>
-                  {String(fHrv.calidad)}
+                  {fHrv.calidad}
                 </p>
                 <p className="text-xs text-slate-400">ratio RMSSD/SDNN</p>
               </div>

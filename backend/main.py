@@ -57,15 +57,62 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     )
 
 
+_PYDANTIC_MSG_ES = {
+    "missing": "es obligatorio",
+    "string_too_short": "es muy corto",
+    "string_too_long": "es muy largo",
+    "value_error.email": "no es un correo válido",
+    "value_error": "no tiene un valor válido",
+    "type_error": "tiene un tipo de dato incorrecto",
+    "greater_than": "debe ser mayor al mínimo permitido",
+    "less_than": "debe ser menor al máximo permitido",
+    "greater_than_equal": "es menor al mínimo permitido",
+    "less_than_equal": "supera el máximo permitido",
+    "string_pattern_mismatch": "tiene un formato no válido",
+    "json_invalid": "no es un JSON válido",
+}
+
+_CAMPO_ES = {
+    "email": "El correo",
+    "password": "La contraseña",
+    "nombre": "El nombre",
+    "apellido": "El apellido",
+    "id_rol": "El rol",
+    "p_somnolencia": "La probabilidad de somnolencia",
+    "p_fatiga_fisiologica": "La probabilidad de fatiga",
+    "p_total": "La probabilidad total",
+    "dictamen": "El dictamen",
+    "duracion_s": "La duración",
+    "duracion_captura_s": "La duración de captura",
+    "camera_profile": "El perfil de cámara",
+    "camara_id": "El identificador de cámara",
+    "puerto_arduino": "El puerto del Arduino",
+}
+
+
+def _humanizar_validacion(errores: list[dict]) -> str:
+    """Convierte errores Pydantic (en inglés con paths técnicos) a mensajes
+    cortos en español que un usuario final pueda entender."""
+    mensajes: list[str] = []
+    for err in errores:
+        loc = [str(l) for l in err.get("loc", []) if l not in ("body", "query", "path")]
+        campo_raw = loc[-1] if loc else "el dato"
+        campo = _CAMPO_ES.get(campo_raw, f"El campo '{campo_raw}'")
+        tipo = err.get("type", "")
+        # Prioriza match exacto; fallback a familia (split por ".")
+        problema = _PYDANTIC_MSG_ES.get(tipo) or _PYDANTIC_MSG_ES.get(tipo.split(".")[0]) \
+                   or "tiene un valor inválido"
+        mensajes.append(f"{campo} {problema}")
+    return ". ".join(mensajes) + "."
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    errores = "; ".join(
-        f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
-        for e in exc.errors()
-    )
+    mensaje = _humanizar_validacion(exc.errors())
+    logger.warning("Validación fallida en %s: %s", request.url.path, exc.errors())
     return JSONResponse(
         status_code=422,
-        content={"status": False, "message": errores, "data": None},
+        content={"status": False, "message": mensaje, "data": None},
     )
 
 

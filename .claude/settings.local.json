@@ -62,7 +62,13 @@
       "WebFetch(domain:www.google.com)",
       "WebFetch(domain:www.farnell.com)",
       "WebFetch(domain:manualzz.com)",
-      "WebFetch(domain:usermanual.wiki)"
+      "WebFetch(domain:usermanual.wiki)",
+      "Bash(.venv/Scripts/python -c \"from app.services.evaluacion_service import EvaluacionService; from app.services.calibracion_service import CalibracionService; from app.services.dispositivos_service import _scan_blocking; import main; print\\('OK imports'\\)\")",
+      "Bash(python -c \"import main; print\\('OK local'\\)\")",
+      "Bash(.venv/Scripts/python -c \"import main; print\\('OK local'\\)\")",
+      "Bash(.venv/Scripts/python main.py --help)",
+      "Bash(.venv/Scripts/python -c \"import main; print\\('OK'\\)\")",
+      "Bash(.venv/Scripts/python -c \"from app.services.calibracion_service import CalibracionService; from app.dtos.baseline_somnolencia_dto import CalibracionResultadoResponse, BaselineM2Resumen; import main; print\\('OK'\\)\")"
     ]
   }
 }

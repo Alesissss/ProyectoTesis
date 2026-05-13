@@ -22,6 +22,7 @@ Flujo:
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import queue
@@ -61,6 +62,23 @@ BAUD_RATE      = 115200
 DURACION_S     = 30.0
 
 
+# ─── Identidad del operador (extraída del JWT sin verificar firma) ───────────
+# Solo para estampar `id_usuario` / `email` en el JSON guardado localmente
+# (resultado_sin_enviar.json) cuando el POST al backend falla y necesitamos
+# saber a quién corresponden los datos al recuperarlos. La verificación de
+# firma la hace el backend en cada request — aquí solo leemos el payload.
+
+def _decodificar_jwt(token: str) -> dict:
+    try:
+        _, payload_b64, _ = token.split(".")
+        # base64 URL-safe sin padding → rellenar
+        padding = "=" * (-len(payload_b64) % 4)
+        raw = base64.urlsafe_b64decode(payload_b64 + padding)
+        return json.loads(raw.decode("utf-8"))
+    except Exception:
+        return {}
+
+
 # ─── Adquisición EMG desde Arduino ───────────────────────────────────────────
 
 def _detectar_puerto_arduino() -> str | None:
@@ -83,6 +101,7 @@ def _leer_emg_arduino(puerto: str, duracion_s: float,
         ser = serial.Serial(puerto, BAUD_RATE, timeout=1.0)
         time.sleep(2.0)  # esperar reset del Arduino tras apertura del puerto
         t_fin = time.time() + duracion_s
+        leidas = 0
         while time.time() < t_fin:
             linea = ser.readline().decode("ascii", errors="ignore").strip()
             if "," in linea:
@@ -91,45 +110,99 @@ def _leer_emg_arduino(puerto: str, duracion_s: float,
                     try:
                         valor = float(partes[1])
                         cola.put(valor)
+                        leidas += 1
                     except ValueError:
                         pass
         ser.close()
+        if leidas == 0:
+            # Puerto abierto pero Arduino no envió nada: shield apagado,
+            # firmware no flasheado, o baud rate distinto.
+            print(f"[EMG] Puerto {puerto} abierto pero 0 líneas leídas en "
+                  f"{duracion_s:.0f}s a {BAUD_RATE} baudios.", file=sys.stderr)
+    except serial.SerialException as exc:
+        print(f"[EMG] No se pudo abrir {puerto}: {exc}", file=sys.stderr)
+        cola.put(exc)
     except Exception as exc:
+        print(f"[EMG] Error inesperado leyendo {puerto}: {exc}", file=sys.stderr)
         cola.put(exc)
 
 
-def _procesar_senal_emg(muestras: list[float], fs: float = 500.0) -> FeaturesEMG:
-    """
-    Calcula RMS, frecuencia mediana y frecuencia media de la señal EMG filtrada.
-    La señal ya llega filtrada por el Arduino (Butterworth ord. 4, 20–200 Hz).
+def _procesar_senal_emg(
+    muestras: list[float], fs: float = 500.0
+) -> tuple[FeaturesEMG | None, dict]:
+    """Filtra la señal EMG, calcula features espectrales y valida calidad.
+
+    La señal del Arduino entra en cruda en 20–200 Hz; el filtro pasabanda del
+    shield NO elimina el ruido de red (60 Hz cae DENTRO de la banda muscular).
+    Aquí aplicamos:
+      1) Notch IIR en 60 Hz y su segundo armónico (120 Hz).
+      2) Cálculo de RMS y frecuencias en banda muscular útil 20–200 Hz
+         (excluyendo bandas notch).
+      3) Quality gate: si tras el filtrado la potencia residual en ±5 Hz de
+         60 Hz sigue dominando el total → la señal NO es muscular válida
+         (electrodos secos, cable largo sin shield, batería baja, etc.) y
+         devolvemos (None, calidad) para que el motor M2 la omita y no
+         contamine el dictamen con un falso "incremento RMS / caída espectral".
+
+    Devuelve (features | None, calidad), donde calidad tiene:
+      valido (bool), ratio_60hz, motivo (str).
     """
     import numpy as np
     from numpy.fft import rfft, rfftfreq
+    from scipy.signal import iirnotch, filtfilt
 
     sig = np.array(muestras, dtype=np.float64)
-    if len(sig) == 0:
-        return FeaturesEMG(rms=0.0, freq_mediana=0.0, freq_media=0.0)
+    calidad: dict = {"valido": False, "ratio_60hz": None, "motivo": ""}
 
+    if len(sig) < int(fs):  # menos de 1 segundo de señal
+        calidad["motivo"] = "captura demasiado corta"
+        return None, calidad
+
+    # ── 1) Notch 60 Hz y 120 Hz ──────────────────────────────────────────────
+    # Q=30 da un ancho ~2 Hz, suficiente para la red sin tocar 50/70/110/130.
+    for f0 in (60.0, 120.0):
+        if f0 < fs / 2:
+            b, a = iirnotch(w0=f0 / (fs / 2), Q=30.0)
+            sig = filtfilt(b, a, sig)
+
+    # ── 2) Quality gate: medir potencia residual en 60 Hz ────────────────────
+    fft_full = np.abs(rfft(sig)) ** 2
+    freqs_full = rfftfreq(len(sig), d=1.0 / fs)
+    total_pwr = float(fft_full[(freqs_full >= 20) & (freqs_full <= 250)].sum())
+    ruido_60 = float(fft_full[(freqs_full >= 55) & (freqs_full <= 65)].sum()) + \
+               float(fft_full[(freqs_full >= 115) & (freqs_full <= 125)].sum())
+    ratio = ruido_60 / total_pwr if total_pwr > 0 else 1.0
+    calidad["ratio_60hz"] = round(ratio, 4)
+
+    # Umbral 30%: después del notch, si más de un tercio de la potencia útil
+    # SIGUE en bandas de red, hay algo mal en el hardware (electrodos sueltos,
+    # batería baja, cable sin shield). No es señal muscular fiable.
+    if ratio > 0.30:
+        calidad["motivo"] = (
+            f"ruido de red dominante tras filtrar ({ratio * 100:.1f}% en 60/120 Hz). "
+            "Revisar electrodos, gel y batería."
+        )
+        return None, calidad
+
+    # ── 3) Features espectrales en banda muscular útil, excluyendo notch ─────
     rms = float(np.sqrt(np.mean(sig ** 2)))
-
-    # Espectro de potencia
-    fft_vals = np.abs(rfft(sig)) ** 2
-    freqs    = rfftfreq(len(sig), d=1.0 / fs)
-
-    # Restringir a banda 20–200 Hz
-    mask = (freqs >= 20) & (freqs <= 200)
-    pwr  = fft_vals[mask]
-    f    = freqs[mask]
-
+    mask = ((freqs_full >= 20) & (freqs_full <= 200) &
+            ~((freqs_full >= 55) & (freqs_full <= 65)) &
+            ~((freqs_full >= 115) & (freqs_full <= 125)))
+    pwr = fft_full[mask]
+    f = freqs_full[mask]
     if pwr.sum() == 0:
-        return FeaturesEMG(rms=rms, freq_mediana=0.0, freq_media=0.0)
+        calidad["motivo"] = "sin potencia útil tras filtrado"
+        return None, calidad
 
     pwr_acum = np.cumsum(pwr)
-    idx_med  = np.searchsorted(pwr_acum, pwr_acum[-1] / 2.0)
+    idx_med = np.searchsorted(pwr_acum, pwr_acum[-1] / 2.0)
     freq_med = float(f[idx_med]) if idx_med < len(f) else 0.0
     freq_mean = float(np.average(f, weights=pwr))
 
-    return FeaturesEMG(rms=rms, freq_mediana=freq_med, freq_media=freq_mean)
+    calidad["valido"] = True
+    calidad["motivo"] = "OK"
+    return FeaturesEMG(rms=rms, freq_mediana=freq_med, freq_media=freq_mean), calidad
 
 
 # ─── Backend API helpers ──────────────────────────────────────────────────────
@@ -142,9 +215,12 @@ def _get_baseline(token: str) -> dict | None:
             timeout=10,
         )
         if r.status_code == 200:
-            return r.json()
-    except Exception:
-        pass
+            payload = r.json()
+            return payload.get("data") if "data" in payload else payload
+        print(f"[BASELINE-EMG] backend devolvió {r.status_code}: {r.text[:200]}",
+              file=sys.stderr)
+    except Exception as exc:
+        print(f"[BASELINE-EMG] error de red: {exc}", file=sys.stderr)
     return None
 
 
@@ -160,12 +236,20 @@ def _get_baseline_somnolencia(token: str) -> dict | None:
             payload = r.json()
             # ApiResponse envuelve en {data: {...}} — soportar ambos formatos.
             return payload.get("data") if "data" in payload else payload
-    except Exception:
-        pass
+        # 404 esperado cuando el médico aún no calibró; otros códigos son síntoma.
+        if r.status_code != 404:
+            print(f"[BASELINE-M1] backend devolvió {r.status_code}: {r.text[:200]}",
+                  file=sys.stderr)
+        else:
+            print("[BASELINE-M1] sin baseline activo en el backend "
+                  "(404). ¿Calibraste primero?", file=sys.stderr)
+    except Exception as exc:
+        print(f"[BASELINE-M1] error de red: {exc}", file=sys.stderr)
     return None
 
 
-def _post_evaluacion(token: str, payload: dict) -> dict | None:
+def _post_evaluacion(token: str, payload: dict) -> tuple[dict | None, str | None]:
+    """Devuelve (respuesta_json, error_msg). error_msg es None si todo OK."""
     try:
         r = requests.post(
             f"{BACKEND_URL}/evaluaciones",
@@ -174,11 +258,14 @@ def _post_evaluacion(token: str, payload: dict) -> dict | None:
             timeout=15,
         )
         if r.status_code in (200, 201):
-            return r.json()
-        print(f"[ERROR] Backend devolvió {r.status_code}: {r.text}")
+            return r.json(), None
+        err = f"backend devolvió {r.status_code}: {r.text[:400]}"
+        print(f"[POST-EVALUACION] {err}", file=sys.stderr)
+        return None, err
     except Exception as exc:
-        print(f"[ERROR] No se pudo conectar al backend: {exc}")
-    return None
+        err = f"no se pudo conectar al backend: {exc}"
+        print(f"[POST-EVALUACION] {err}", file=sys.stderr)
+        return None, err
 
 
 # ─── Rutina principal ─────────────────────────────────────────────────────────
@@ -186,7 +273,8 @@ def _post_evaluacion(token: str, payload: dict) -> dict | None:
 def ejecutar(token: str, duracion_s: float = DURACION_S,
              camara_id: int | None = None,
              puerto_arduino: str | None = None,
-             camera_profile: str | None = None) -> None:
+             camera_profile: str | None = None,
+             post_al_backend: bool = True) -> None:
 
     # Cuando el backend invoca este script por subprocess, lee stdout para
     # extraer el JSON final tras EVALUACION_RESULT_MARKER. Cualquier otro
@@ -195,6 +283,13 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
     # para emitir el marcador + JSON en el stdout real.
     _stdout_real = sys.stdout
     sys.stdout = sys.stderr
+
+    # Identidad del operador (para estampar en metadatos y respaldo local).
+    jwt_payload = _decodificar_jwt(token)
+    id_usuario  = jwt_payload.get("sub")
+    email       = jwt_payload.get("email")
+    if id_usuario:
+        print(f"  Operador: {email or '?'} (id={id_usuario})")
 
     print("\n═══════════════════════════════════════")
     print("  VigilanceAI — Detección en curso")
@@ -296,18 +391,39 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
     else:
         print("[AVISO] rPPG/HRV no disponible (señal insuficiente).")
 
+    emg_calidad: dict = {"valido": False, "ratio_60hz": None, "motivo": "sin datos"}
     if muestras:
-        emg_feat = _procesar_senal_emg(muestras)
-        resultado_m2 = calcular_p_fatiga(emg_feat, baseline, hrv=hrv_feat)
-        print(f"       EMG: RMS={emg_feat.rms:.1f} µV, "
-              f"F_mediana={emg_feat.freq_mediana:.1f} Hz")
-        for alerta in resultado_m2.alertas:
-            print(f"       ⚠  {alerta}")
+        emg_feat, emg_calidad = _procesar_senal_emg(muestras)
+        if emg_feat is not None:
+            resultado_m2 = calcular_p_fatiga(emg_feat, baseline, hrv=hrv_feat)
+            print(f"       EMG: RMS={emg_feat.rms:.1f} µV, "
+                  f"F_mediana={emg_feat.freq_mediana:.1f} Hz "
+                  f"(ruido 60Hz={emg_calidad['ratio_60hz']*100:.1f}%)")
+            for alerta in resultado_m2.alertas:
+                print(f"       ⚠  {alerta}")
+        else:
+            # Señal EMG inválida (ruido de red dominante u otra anomalía).
+            # No la usamos en M2 para no contaminar el dictamen con falsos
+            # incrementos RMS y caídas espectrales que son artefactos.
+            print(f"[AVISO] EMG omitido: {emg_calidad['motivo']}", file=sys.stderr)
+            emg_feat = None
+            if hrv_feat is not None:
+                from modules.m2_reglas import FeaturesEMG as _FEMG
+                emg_vacio = _FEMG(
+                    rms=baseline.rms_emg,
+                    freq_mediana=baseline.freq_mediana,
+                    freq_media=baseline.freq_media,
+                )
+                resultado_m2 = calcular_p_fatiga(emg_vacio, baseline, hrv=hrv_feat)
+            else:
+                from modules.m2_reglas import ResultadoM2
+                resultado_m2 = ResultadoM2(
+                    p_fatiga=0.0, dictamen_parcial="BAJO", reglas={}, alertas=[]
+                )
     else:
         print("[AVISO] Sin datos EMG. M2 operará solo con rPPG si está disponible.")
+        emg_feat = None
         if hrv_feat is not None:
-            # Sin EMG pero con rPPG: crear features EMG vacías (no activarán reglas EMG)
-            emg_feat = None
             from modules.m2_reglas import FeaturesEMG as _FEMG
             emg_vacio = _FEMG(
                 rms=baseline.rms_emg,
@@ -320,7 +436,6 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
             resultado_m2 = ResultadoM2(
                 p_fatiga=0.0, dictamen_parcial="BAJO", reglas={}, alertas=[]
             )
-            emg_feat = None
 
     # ── 5. Fusión tardía M3 (con corrección por baseline si está disponible) ─
     resultado_m3 = fusionar(
@@ -352,6 +467,7 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
             "freq_mediana": round(emg_feat.freq_mediana, 4) if emg_feat else None,
             "freq_media":   round(emg_feat.freq_media, 4) if emg_feat else None,
             "n_muestras":   len(muestras),
+            "calidad":      emg_calidad,   # {valido, ratio_60hz, motivo}
             "reglas_m2":    resultado_m2.reglas,
         },
         "features_hrv": resultado_m1.hrv,   # rPPG desde cámara ALPCAM AR0234
@@ -361,31 +477,48 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
             "camara":             cam.name,
             "puerto_arduino":     puerto_arduino,
             "baseline_id":        baseline_dict.get("id_baseline") if baseline_dict else None,
+            "baseline_somnolencia_id": baseline_somn.get("id_baseline") if baseline_somn else None,
+            "p_somnolencia_baseline": p_baseline_somn,
             "hrv_fuente":         "rppg_camara" if resultado_m1.hrv else None,
+            "id_usuario":         id_usuario,
+            "email_operador":     email,
         },
     }
 
-    print("[4/4] Enviando resultado al backend...")
-    respuesta = _post_evaluacion(token, payload)
-
-    # `respuesta` es el ApiResponse envelope: {status, message, data: {...}}.
-    # El id está en data.id_evaluacion.
+    # Solo POSTeamos al backend desde CLI. Desde la web, el backend persiste
+    # él mismo a partir del JSON que emitimos por stdout (evita duplicación).
     id_evaluacion: str | None = None
-    if respuesta:
-        data_eval = respuesta.get("data") if isinstance(respuesta, dict) else None
-        if isinstance(data_eval, dict):
-            id_evaluacion = data_eval.get("id_evaluacion")
-        print(f"      Evaluación registrada: id={id_evaluacion or '?'}")
+    post_error: str | None = None
+    if post_al_backend:
+        print("[4/4] Enviando resultado al backend...")
+        respuesta, post_error = _post_evaluacion(token, payload)
+
+        if respuesta:
+            data_eval = respuesta.get("data") if isinstance(respuesta, dict) else None
+            if isinstance(data_eval, dict):
+                id_evaluacion = data_eval.get("id_evaluacion")
+            print(f"      Evaluación registrada: id={id_evaluacion or '?'}")
+        else:
+            print(f"      No se pudo registrar. Resultado guardado localmente. "
+                  f"Causa: {post_error}")
+            respaldo = {
+                "id_usuario":         id_usuario,
+                "email_operador":     email,
+                "post_error":         post_error,
+                "timestamp_local":    time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "payload":            payload,
+            }
+            with open("resultado_sin_enviar.json", "w", encoding="utf-8") as f:
+                json.dump(respaldo, f, ensure_ascii=False, indent=2)
+            print("      → resultado_sin_enviar.json")
     else:
-        print("      No se pudo registrar. Resultado guardado localmente.")
-        with open("resultado_sin_enviar.json", "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        print("      → resultado_sin_enviar.json")
+        print("[4/4] Datos emitidos por stdout — el backend los persistirá.")
 
     # ── Marcador para el backend (subprocess) ────────────────────────────────
     # El JSON debe ir al stdout REAL (no al stderr al que redirigimos arriba).
     resultado_subprocess = {
         "id_evaluacion":     id_evaluacion,
+        "id_usuario":        id_usuario,
         "dictamen":          resultado_m3.dictamen,
         "p_somnolencia":     resultado_m3.p_somnolencia,
         "p_fatiga_fisiologica": resultado_m3.p_fatiga_fisiologica,
@@ -395,7 +528,11 @@ def ejecutar(token: str, duracion_s: float = DURACION_S,
         "fps_observado":     resultado_m1.features.get("fps_observado"),
         "n_muestras_emg":    len(muestras),
         "hrv_disponible":    resultado_m1.hrv is not None,
+        "post_error":        post_error,
         "justificacion":     list(resultado_m3.justificacion),
+        # Payload completo para que el backend pueda persistir cuando
+        # post_al_backend=False (modo web).
+        "payload_evaluacion": payload,
     }
     sys.stdout = _stdout_real
     print(EVALUACION_RESULT_MARKER)
@@ -409,28 +546,62 @@ def ejecutar_calibracion_m1(
     duracion_s: float = 30.0,
     camara_id: int | None = None,
     camera_profile: str | None = None,
+    puerto_arduino: str | None = None,
+    post_al_backend: bool = True,
 ) -> None:
-    """Captura `duracion_s` segundos del médico en estado alerta declarado y
-    POSTea el resultado a /baselines/somnolencia.
+    """Calibración unificada en estado alerta: captura M1 (visión), M2-EMG
+    (Arduino sEMG) y M2-HRV (rPPG cara) en el MISMO intervalo de `duracion_s`.
 
-    Diseñado para ser llamado tanto desde CLI (`--calibracion-m1`) como desde
-    el backend vía subprocess (servicio `CalibracionService`). En el segundo
-    caso, el backend captura stdout: por eso el JSON final se imprime detrás
-    del marcador `CALIBRACION_RESULT_MARKER` para que sea fácil de extraer
-    aunque MediaPipe escupa warnings antes.
+    El sistema experto difuso M2 evalúa cada regla contra el baseline personal
+    del sujeto (RNF-05). Si solo se calibra M1, las reglas EMG/HRV no tienen
+    referencia y disparan falsos positivos. Esta función emite los DOS
+    baselines (M1 y M2) tras la misma sesión de 30 s.
+
+    Modos:
+      • CLI (`post_al_backend=True`): el script POSTea ambos baselines.
+      • Subprocess web (`post_al_backend=False`): el backend persiste a partir
+        del JSON emitido por stdout. Evita race conditions.
+
+    El JSON final, tras el marcador `CALIBRACION_RESULT_MARKER`, contiene:
+      m1: {p_somnolencia, ear_promedio, mar_promedio, ...}
+      m2: {emg: {...}, hrv: {...}, emg_calidad: {...}} — m2 puede ser parcial
+          si Arduino no conectado o EMG ruidoso.
     """
     print("\n═══════════════════════════════════════", file=sys.stderr)
-    print("  VigilanceAI — Calibración M1", file=sys.stderr)
-    print(f"  Mantenete alerta y quieto durante {duracion_s:.0f} s", file=sys.stderr)
+    print("  VigilanceAI — Calibración personal", file=sys.stderr)
+    print(f"  Mantente alerta y quieto durante {duracion_s:.0f} s", file=sys.stderr)
     print("═══════════════════════════════════════\n", file=sys.stderr)
+
+    # ── 1. Detectar Arduino para capturar EMG en paralelo ────────────────────
+    if puerto_arduino is None:
+        puerto_arduino = _detectar_puerto_arduino()
+    if puerto_arduino:
+        print(f"  Arduino detectado en {puerto_arduino} — se capturará EMG.",
+              file=sys.stderr)
+    else:
+        print("  Arduino no detectado. El baseline M2 solo incluirá HRV.",
+              file=sys.stderr)
+
+    # ── 2. Captura paralela: cámara (M1+rPPG) + Arduino sEMG ─────────────────
+    cola_emg: queue.Queue = queue.Queue()
+    hilo_emg = None
+    if puerto_arduino:
+        hilo_emg = threading.Thread(
+            target=_leer_emg_arduino,
+            args=(puerto_arduino, duracion_s, cola_emg),
+            daemon=True,
+        )
+        hilo_emg.start()
 
     cam = get_profile(camera_profile)
     print(f"  Cámara: {cam.name}", file=sys.stderr)
     m1 = ModuloVision(ruta_modelo=MODELO_M1_PATH, duracion_s=duracion_s, camera=cam)
     resultado_m1 = m1.capturar_y_evaluar(camara_id=camara_id)
 
-    # Liveness también aplica a calibración: si está mirando una foto, su
-    # baseline sería basura y contaminaría TODAS las futuras evaluaciones.
+    if hilo_emg is not None:
+        hilo_emg.join(timeout=duracion_s + 5)
+
+    # ── 3. Liveness check — si falla, baseline contaminaría todo el futuro ──
     liveness_ok, razones_liveness = validar_liveness(resultado_m1)
     if not liveness_ok:
         print("\n[LIVENESS FAIL] Calibración rechazada:", file=sys.stderr)
@@ -451,40 +622,115 @@ def ejecutar_calibracion_m1(
         print(json.dumps(resultado, ensure_ascii=False))
         return
 
-    # POST al backend para persistir el baseline.
-    payload_post = {
-        "p_somnolencia":     resultado_m1.p_somnolencia,
-        "ear_promedio":      resultado_m1.ear_promedio,
-        "mar_promedio":      resultado_m1.mar_promedio,
-        "duracion_s":        resultado_m1.duracion_s,
-        "frames_procesados": resultado_m1.frames_procesados,
-    }
-    backend_response: dict | None = None
-    try:
-        r = requests.post(
-            f"{BACKEND_URL}/baselines/somnolencia",
-            json=payload_post,
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=15,
-        )
-        if r.status_code in (200, 201):
-            backend_response = r.json()
-            print(f"[OK] Baseline registrado en backend.", file=sys.stderr)
-        else:
-            print(f"[ERROR] Backend devolvió {r.status_code}: {r.text}", file=sys.stderr)
-    except Exception as exc:
-        print(f"[ERROR] No se pudo POSTear el baseline: {exc}", file=sys.stderr)
+    # ── 4. Procesar EMG (con notch + quality gate) ───────────────────────────
+    muestras: list[float] = []
+    while not cola_emg.empty():
+        item = cola_emg.get()
+        if isinstance(item, float):
+            muestras.append(item)
 
-    # Imprimir resultado consumible por el backend (subprocess parser).
+    baseline_emg: dict | None = None
+    emg_calidad: dict = {"valido": False, "ratio_60hz": None,
+                          "motivo": "sin Arduino" if not puerto_arduino else "sin datos"}
+    if muestras:
+        emg_feat, emg_calidad = _procesar_senal_emg(muestras)
+        if emg_feat is not None:
+            baseline_emg = {
+                "rms_emg":      round(emg_feat.rms, 4),
+                "freq_mediana": round(emg_feat.freq_mediana, 4),
+                "freq_media":   round(emg_feat.freq_media, 4),
+            }
+            print(f"  Baseline EMG: RMS={emg_feat.rms:.1f} µV, "
+                  f"F_med={emg_feat.freq_mediana:.1f} Hz "
+                  f"(ruido 60Hz {emg_calidad['ratio_60hz']*100:.1f}%)",
+                  file=sys.stderr)
+        else:
+            print(f"  [AVISO] EMG no válido: {emg_calidad['motivo']}", file=sys.stderr)
+
+    # ── 5. HRV desde rPPG (cara) — siempre disponible si hubo señal facial ───
+    baseline_hrv: dict | None = None
+    if resultado_m1.hrv is not None:
+        baseline_hrv = {
+            "sdnn":  round(float(resultado_m1.hrv.get("sdnn", 0.0)), 4),
+            "rmssd": round(float(resultado_m1.hrv.get("rmssd", 0.0)), 4),
+            "pnn50": round(float(resultado_m1.hrv.get("pnn50", 0.0)), 4),
+        }
+        print(f"  Baseline HRV: SDNN={baseline_hrv['sdnn']:.1f} ms, "
+              f"RMSSD={baseline_hrv['rmssd']:.1f} ms, "
+              f"pNN50={baseline_hrv['pnn50']:.1f}%", file=sys.stderr)
+
+    # ── 6. POST al backend (solo en modo CLI) ────────────────────────────────
+    backend_response_m1: dict | None = None
+    backend_response_m2: dict | None = None
+    if post_al_backend:
+        # M1
+        payload_m1 = {
+            "p_somnolencia":     resultado_m1.p_somnolencia,
+            "ear_promedio":      resultado_m1.ear_promedio,
+            "mar_promedio":      resultado_m1.mar_promedio,
+            "duracion_s":        resultado_m1.duracion_s,
+            "frames_procesados": resultado_m1.frames_procesados,
+        }
+        try:
+            r = requests.post(
+                f"{BACKEND_URL}/baselines/somnolencia",
+                json=payload_m1,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=15,
+            )
+            if r.status_code in (200, 201):
+                backend_response_m1 = r.json()
+                print("[OK] Baseline M1 registrado.", file=sys.stderr)
+            else:
+                print(f"[BASELINE-M1-POST] {r.status_code}: {r.text[:200]}",
+                      file=sys.stderr)
+        except Exception as exc:
+            print(f"[BASELINE-M1-POST] error: {exc}", file=sys.stderr)
+
+        # M2 (requiere EMG válido por el schema actual de baselines_emg)
+        if baseline_emg is not None:
+            payload_m2 = {**baseline_emg}
+            if baseline_hrv is not None:
+                payload_m2.update(baseline_hrv)
+            try:
+                r = requests.post(
+                    f"{BACKEND_URL}/baselines",
+                    json=payload_m2,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=15,
+                )
+                if r.status_code in (200, 201):
+                    backend_response_m2 = r.json()
+                    print("[OK] Baseline M2 registrado.", file=sys.stderr)
+                else:
+                    print(f"[BASELINE-M2-POST] {r.status_code}: {r.text[:200]}",
+                          file=sys.stderr)
+            except Exception as exc:
+                print(f"[BASELINE-M2-POST] error: {exc}", file=sys.stderr)
+        else:
+            print("[AVISO] Baseline M2 NO se registra (EMG no válido o sin Arduino).",
+                  file=sys.stderr)
+
+    # ── 7. Emitir JSON consumible por el backend (subprocess parser) ─────────
     resultado = {
-        "p_somnolencia":     resultado_m1.p_somnolencia,
-        "ear_promedio":      resultado_m1.ear_promedio,
-        "mar_promedio":      resultado_m1.mar_promedio,
-        "duracion_s":        resultado_m1.duracion_s,
-        "frames_procesados": resultado_m1.frames_procesados,
-        "ventanas_inferidas": resultado_m1.ventanas_inferidas,
-        "fps_observado":     resultado_m1.features.get("fps_observado"),
-        "backend_response":  backend_response,
+        "m1": {
+            "p_somnolencia":     resultado_m1.p_somnolencia,
+            "ear_promedio":      resultado_m1.ear_promedio,
+            "mar_promedio":      resultado_m1.mar_promedio,
+            "duracion_s":        resultado_m1.duracion_s,
+            "frames_procesados": resultado_m1.frames_procesados,
+            "ventanas_inferidas": resultado_m1.ventanas_inferidas,
+            "fps_observado":     resultado_m1.features.get("fps_observado"),
+        },
+        "m2": {
+            "emg":         baseline_emg,
+            "hrv":         baseline_hrv,
+            "emg_calidad": emg_calidad,
+            "n_muestras_emg": len(muestras),
+            "arduino_detectado": bool(puerto_arduino),
+        },
+        "backend_response_m1": backend_response_m1,
+        "backend_response_m2": backend_response_m2,
     }
     print(CALIBRACION_RESULT_MARKER)
     print(json.dumps(resultado, ensure_ascii=False))
@@ -586,6 +832,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--calibracion-m1", action="store_true",
                    help="Modo calibración M1: captura sujeto alerta y registra "
                         "p_somnolencia_baseline en el backend (no ejecuta evaluación).")
+    p.add_argument("--no-post", action="store_true",
+                   help="No POSTear al backend; solo emitir JSON por stdout. "
+                        "Lo usa el backend cuando invoca este script como "
+                        "subprocess para evitar registros duplicados.")
     return p.parse_args()
 
 
@@ -594,12 +844,15 @@ if __name__ == "__main__":
     if getattr(args, "listar_camaras", False):
         _emitir_listado_camaras()
         sys.exit(0)
+    post_al_backend = not args.no_post
     if args.calibracion_m1:
         ejecutar_calibracion_m1(
             token=args.token,
             duracion_s=args.duracion,
             camara_id=args.camara,
             camera_profile=args.camera_profile,
+            puerto_arduino=args.puerto,
+            post_al_backend=post_al_backend,
         )
     else:
         ejecutar(
@@ -608,4 +861,5 @@ if __name__ == "__main__":
             camara_id=args.camara,
             puerto_arduino=args.puerto,
             camera_profile=args.camera_profile,
+            post_al_backend=post_al_backend,
         )

@@ -15,7 +15,7 @@ const navItems = [
   { to: '/calibracion', label: 'Calibración', icon: '🎯', permiso: 'baseline_somnolencia:registrar', end: true },
   { to: '/evaluaciones/iniciar', label: 'Iniciar Evaluación', icon: '▶️', permiso: 'evaluacion:registrar', end: true },
   { to: '/evaluaciones', label: 'Mis Evaluaciones', icon: '📋', permiso: 'evaluacion:ver_propias', end: true },
-  { to: '/administracion', label: 'Administración', icon: '⚙️', permiso: 'usuario:gestionar', end: true },
+  { to: '/usuarios', label: 'Usuarios', icon: '👥', permiso: 'usuario:gestionar', end: true },
 ]
 
 export default function Layout() {

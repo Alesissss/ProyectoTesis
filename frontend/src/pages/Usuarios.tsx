@@ -24,7 +24,7 @@ const emptyForm: FormState = {
   id_rol: '',
 }
 
-export default function Administracion() {
+export default function Usuarios() {
   const [usuarios, setUsuarios] = useState<Usuario[]>([])
   const [roles, setRoles] = useState<Rol[]>([])
   const [loading, setLoading] = useState(true)
@@ -107,8 +107,8 @@ export default function Administracion() {
       fetchData()
     } catch (err: unknown) {
       const msg =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        'Error al guardar'
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+        'No se pudo guardar el usuario. Intenta nuevamente.'
       setFormError(msg)
     } finally {
       setSaving(false)
@@ -120,8 +120,11 @@ export default function Administracion() {
     try {
       await deleteUsuario(id)
       fetchData()
-    } catch {
-      alert('No se pudo desactivar el usuario')
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+        'No se pudo desactivar el usuario.'
+      alert(msg)
     }
   }
 
@@ -129,7 +132,7 @@ export default function Administracion() {
     <div className="p-4 sm:p-6 max-w-5xl mx-auto">
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Administración</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Usuarios</h1>
           <p className="text-slate-500 text-sm mt-1">Gestión de usuarios del sistema</p>
         </div>
         <button

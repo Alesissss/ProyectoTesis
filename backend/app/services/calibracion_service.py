@@ -29,11 +29,14 @@ from app.config import settings
 # UTF-8 obligatorio en stdout del subprocess (Windows default cp1252).
 _SUBPROCESS_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
 from app.dtos.auth_dto import TokenData
+from app.dtos.baseline_dto import BaselineCreateRequest
 from app.dtos.baseline_somnolencia_dto import (
+    BaselineM2Resumen,
     BaselineSomnolenciaCreateRequest,
     CalibracionIniciarRequest,
     CalibracionResultadoResponse,
 )
+from app.services.baseline_service import BaselineService
 from app.services.baseline_somnolencia_service import BaselineSomnolenciaService
 
 logger = logging.getLogger(__name__)
@@ -49,6 +52,7 @@ _calibracion_lock = asyncio.Lock()
 class CalibracionService:
     def __init__(self) -> None:
         self._baseline_service = BaselineSomnolenciaService()
+        self._baseline_m2_service = BaselineService()
 
     async def iniciar_calibracion_m1(
         self,
@@ -62,7 +66,8 @@ class CalibracionService:
         if _calibracion_lock.locked():
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                "Ya hay una calibración en curso. Espera a que termine.",
+                "Ya se está realizando una calibración en este momento. "
+                "Espera a que termine antes de iniciar otra.",
             )
 
         async with _calibracion_lock:
@@ -72,26 +77,72 @@ class CalibracionService:
         # baseline basura (que contaminaría TODAS las futuras evaluaciones).
         if datos_local.get("liveness_ok") is False:
             razones = datos_local.get("razones_liveness", [])
-            mensaje = "Calibración rechazada: " + " | ".join(razones) if razones else \
-                      "La calibración no superó la validación de liveness."
+            mensaje = (
+                "Calibración rechazada: " + " | ".join(razones)
+                if razones
+                else "No se pudo validar que estés frente a la cámara. "
+                     "Acomódate frente al lente y reintenta."
+            )
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, mensaje)
 
-        # Persistir el baseline (servicio existente)
-        create_req = BaselineSomnolenciaCreateRequest(
-            p_somnolencia=datos_local["p_somnolencia"],
-            ear_promedio=datos_local.get("ear_promedio"),
-            mar_promedio=datos_local.get("mar_promedio"),
-            duracion_s=datos_local.get("duracion_s"),
-            frames_procesados=datos_local.get("frames_procesados"),
+        # ── Persistir baseline M1 (visión) ──────────────────────────────────
+        m1 = datos_local.get("m1", {})
+        create_req_m1 = BaselineSomnolenciaCreateRequest(
+            p_somnolencia=m1["p_somnolencia"],
+            ear_promedio=m1.get("ear_promedio"),
+            mar_promedio=m1.get("mar_promedio"),
+            duracion_s=m1.get("duracion_s"),
+            frames_procesados=m1.get("frames_procesados"),
         )
-        baseline_resp = await self._baseline_service.registrar(db, create_req, current_user)
+        baseline_m1_resp = await self._baseline_service.registrar(
+            db, create_req_m1, current_user
+        )
+
+        # ── Persistir baseline M2 (EMG + HRV) si la señal EMG fue válida ────
+        # El schema de baselines_emg requiere rms_emg NOT NULL. Si no hubo
+        # Arduino o el EMG estaba contaminado por 60 Hz, no se registra M2 y
+        # se devuelve el resumen con valido=False para que la UI lo explique.
+        m2 = datos_local.get("m2", {}) or {}
+        emg = m2.get("emg")
+        hrv = m2.get("hrv")
+        calidad = m2.get("emg_calidad") or {}
+        resumen_m2 = BaselineM2Resumen(
+            emg_valido=bool(calidad.get("valido", False)),
+            emg_ratio_60hz=calidad.get("ratio_60hz"),
+            emg_motivo=calidad.get("motivo"),
+            arduino_detectado=bool(m2.get("arduino_detectado", False)),
+            n_muestras_emg=int(m2.get("n_muestras_emg", 0)),
+        )
+        if isinstance(emg, dict):
+            try:
+                create_req_m2 = BaselineCreateRequest(
+                    rms_emg=emg["rms_emg"],
+                    freq_mediana=emg["freq_mediana"],
+                    freq_media=emg["freq_media"],
+                    sdnn=(hrv or {}).get("sdnn"),
+                    rmssd=(hrv or {}).get("rmssd"),
+                    pnn50=(hrv or {}).get("pnn50"),
+                )
+                baseline_m2_resp = await self._baseline_m2_service.registrar(
+                    db, create_req_m2, current_user
+                )
+                resumen_m2.id_baseline = baseline_m2_resp.id_baseline
+                resumen_m2.rms_emg = baseline_m2_resp.rms_emg
+                resumen_m2.freq_mediana = baseline_m2_resp.freq_mediana
+                resumen_m2.freq_media = baseline_m2_resp.freq_media
+                resumen_m2.sdnn = baseline_m2_resp.sdnn
+                resumen_m2.rmssd = baseline_m2_resp.rmssd
+                resumen_m2.pnn50 = baseline_m2_resp.pnn50
+            except Exception:
+                logger.exception("Fallo al persistir baseline M2; se devuelve solo M1")
 
         return CalibracionResultadoResponse(
-            baseline=baseline_resp,
-            duracion_real_s=datos_local.get("duracion_s", 0.0),
-            frames_procesados=datos_local.get("frames_procesados", 0),
-            ventanas_inferidas=datos_local.get("ventanas_inferidas", 0),
-            fps_observado=datos_local.get("fps_observado"),
+            baseline=baseline_m1_resp,
+            baseline_m2=resumen_m2,
+            duracion_real_s=m1.get("duracion_s", 0.0),
+            frames_procesados=m1.get("frames_procesados", 0),
+            ventanas_inferidas=m1.get("ventanas_inferidas", 0),
+            fps_observado=m1.get("fps_observado"),
         )
 
     async def _ejecutar_subproceso(
@@ -107,6 +158,7 @@ class CalibracionService:
             python_exe,
             str(local_main),
             "--calibracion-m1",
+            "--no-post",  # el backend persiste; el subprocess solo computa.
             "--token", bearer_token,
             "--duracion", str(request.duracion_s),
         ]
@@ -114,6 +166,8 @@ class CalibracionService:
             cmd.extend(["--camera-profile", request.camera_profile])
         if request.camara_id is not None:
             cmd.extend(["--camara", str(request.camara_id)])
+        if getattr(request, "puerto_arduino", None):
+            cmd.extend(["--puerto", request.puerto_arduino])
 
         logger.info("Disparando subproceso de calibración: %s", " ".join(cmd[:3]))
 
@@ -133,44 +187,50 @@ class CalibracionService:
         except subprocess.TimeoutExpired:
             raise HTTPException(
                 status.HTTP_504_GATEWAY_TIMEOUT,
-                f"La calibración excedió {settings.calibracion_timeout_s} s.",
+                "La calibración tardó más de lo esperado y se canceló. "
+                "Verifica que la cámara responda correctamente e intenta de nuevo.",
             )
         except FileNotFoundError as exc:
-            logger.exception("No se encontró el script local de calibración")
+            logger.exception("No se encontró el script local de calibración: %s", exc)
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                f"No se encontró el script de captura: {exc}",
+                "No fue posible iniciar el proceso de captura. "
+                "Contacta al administrador del sistema.",
             )
 
         stdout = completed.stdout.decode("utf-8", errors="replace")
         stderr = completed.stderr.decode("utf-8", errors="replace")
 
         if completed.returncode != 0:
-            logger.error("Subproceso falló (code=%s). stderr=%s", completed.returncode, stderr[-500:])
+            logger.error("Subproceso de calibración falló (code=%s). stderr=%s",
+                         completed.returncode, stderr[-2000:])
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                f"La captura falló (código {completed.returncode}). "
-                f"Detalle: {stderr.strip().splitlines()[-1] if stderr.strip() else 'sin detalle'}",
+                "Ocurrió un problema durante la captura. "
+                "Verifica que la cámara esté conectada e intenta nuevamente.",
             )
 
         # Buscar el marcador y parsear el JSON que viene después
         idx = stdout.rfind(RESULT_MARKER)
         if idx < 0:
-            logger.error("Marcador %s no encontrado en stdout. Salida: %s",
-                         RESULT_MARKER, stdout[-500:])
+            logger.error("Marcador %s no encontrado en stdout. stderr=%s. stdout-tail=%s",
+                         RESULT_MARKER, stderr[-1000:], stdout[-500:])
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                "El subproceso no emitió el resultado de calibración esperado.",
+                "La captura no produjo un resultado válido. "
+                "Verifica la cámara e intenta nuevamente.",
             )
 
         json_str = stdout[idx + len(RESULT_MARKER):].strip()
         try:
             data = json.loads(json_str)
-        except json.JSONDecodeError as exc:
-            logger.exception("JSON malformado en salida del subproceso")
+        except json.JSONDecodeError:
+            logger.exception("JSON malformado en salida del subproceso. stdout-tail=%s",
+                             stdout[-500:])
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                f"Resultado de calibración malformado: {exc}",
+                "El resultado de la calibración no se pudo interpretar. "
+                "Reintenta la captura.",
             )
 
         # Liveness fail: el subprocess emite el dict sin p_somnolencia. Es
@@ -179,10 +239,14 @@ class CalibracionService:
         if data.get("liveness_ok") is False:
             return data
 
-        if "p_somnolencia" not in data:
+        # Estructura nueva: {m1: {...}, m2: {...}}. La validez se mide por la
+        # presencia de m1.p_somnolencia.
+        if not isinstance(data.get("m1"), dict) or "p_somnolencia" not in data["m1"]:
+            logger.error("Resultado de calibración incompleto: %s", data)
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                "Resultado de calibración incompleto (falta p_somnolencia).",
+                "La calibración no produjo resultados completos. "
+                "Vuelve a intentarlo asegurándote de mantener el rostro visible.",
             )
         return data
 
