@@ -69,7 +69,7 @@ BEGIN
         v_registro_anterior,
         v_registro_nuevo,
         v_usuario_accion,
-        current_user
+        session_user
     );
 
     -- ── 5. Retornar el registro correcto ─────────────────────────

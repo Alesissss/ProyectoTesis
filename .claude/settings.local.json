@@ -68,7 +68,8 @@
       "Bash(.venv/Scripts/python -c \"import main; print\\('OK local'\\)\")",
       "Bash(.venv/Scripts/python main.py --help)",
       "Bash(.venv/Scripts/python -c \"import main; print\\('OK'\\)\")",
-      "Bash(.venv/Scripts/python -c \"from app.services.calibracion_service import CalibracionService; from app.dtos.baseline_somnolencia_dto import CalibracionResultadoResponse, BaselineM2Resumen; import main; print\\('OK'\\)\")"
+      "Bash(.venv/Scripts/python -c \"from app.services.calibracion_service import CalibracionService; from app.dtos.baseline_somnolencia_dto import CalibracionResultadoResponse, BaselineM2Resumen; import main; print\\('OK'\\)\")",
+      "Bash(git check-ignore *)"
     ]
   }
 }

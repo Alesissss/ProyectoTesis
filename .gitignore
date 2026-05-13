@@ -99,8 +99,8 @@ local/modelo_m1/
 
 # ── Datasets (no versionar imágenes/CSVs grandes) ─
 # Los CSVs de resultados en /resultados/ SÍ se versionan (son pequeños).
-data/
-datasets/
+/data/
+/datasets/
 *.zip
 *.tar.gz
 *.tar.bz2
